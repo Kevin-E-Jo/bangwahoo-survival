@@ -1,0 +1,159 @@
+// 방과후 서바이벌 — DB 스키마
+// Auth.js 표준 모델(User/Account/Session/VerificationToken) + 게임 데이터(TownProgress/InventoryItem)
+// + 서버 권위 검증용 RunSeed/RunSubmission.
+//
+// RLS 참고: 이 프로젝트는 Supabase Auth가 아니라 Auth.js(NextAuth)로 인증하므로
+// Postgres의 auth.uid()는 채워지지 않는다. 대신 각 요청마다 Prisma가
+// `SELECT set_config('app.user_id', <userId>, true)` 로 세션 변수를 세팅하고,
+// RLS 정책은 그 세션 변수를 기준으로 검사한다. 정책 정의는 supabase/rls.sql 참고.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ── Auth.js 표준 스키마 ──────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+
+  accounts Account[]
+  sessions Session[]
+
+  townProgress TownProgress?
+  inventory    InventoryItem[]
+  runSeeds     RunSeed[]
+  runs         RunSubmission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ── 게임 데이터 ──────────────────────────────────────────────────
+
+// 마을 진행도 — 재화와 무기 업그레이드 레벨. 유저당 1행.
+// 업그레이드는 Must-have 범위(1–2종)만 확정된 상태라 명시적 컬럼으로 둔다.
+model TownProgress {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  currency Int @default(0)
+
+  weaponDamageLevel Int @default(0) // 업그레이드 1: 데미지
+  weaponAmmoLevel   Int @default(0) // 업그레이드 2: 탄창 용량
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 보유 무기 파츠 · 수집품. itemKey는 게임 로직 모듈(src/lib/game-logic)의
+// 아이템 카탈로그와 대응된다.
+model InventoryItem {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  itemKey  String
+  quantity Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, itemKey])
+  @@index([userId])
+}
+
+enum RunSeedStatus {
+  ISSUED
+  CONSUMED
+  EXPIRED
+}
+
+// POST /api/run/start 가 발급하는 seed. 클라이언트가 유리한 seed를 고르지
+// 못하도록 서버가 발급하고, 1회성으로 소비된다.
+model RunSeed {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  seed   String        @unique
+  status RunSeedStatus @default(ISSUED)
+
+  issuedAt   DateTime  @default(now())
+  expiresAt  DateTime
+  consumedAt DateTime?
+
+  @@index([userId])
+}
+
+enum RunStatus {
+  VERIFIED
+  REJECTED
+}
+
+// 런 제출 로그. 영구 보관이 필수는 아니지만(블루프린트 참고) 감사 추적을 위해
+// 남긴다 — 필요 시 주기적으로 정리(cron)하면 된다.
+model RunSubmission {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  seed   String
+  status RunStatus
+
+  // 클라이언트가 주장한 결과(감사용 원본, 신뢰하지 않음)
+  clientResult Json
+  // 서버가 seed로 독립 재계산한 확정 보상(신뢰의 원천)
+  verifiedReward Json?
+  rejectReason   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
