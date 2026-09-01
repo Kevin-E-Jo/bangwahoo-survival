@@ -169,6 +169,20 @@ export class DungeonScene extends Phaser.Scene {
       }
     }
 
+    // 화면 밖(왼쪽)으로 빠져나간 적은 정리한다 — 그렇지 않으면 플레이어와
+    // 높이가 안 맞아 접촉 판정도, 총알도 맞지 않고 지나간 개체가 영원히
+    // "생존" 상태로 남아 checkWaveClear()가 절대 통과하지 못하고 웨이브가
+    // 멈춰버린다 (실제 테스트 중 발견).
+    let enemyEscaped = false;
+    for (const enemyObj of this.enemies.getChildren()) {
+      const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
+      if (enemy.active && enemy.x < -40) {
+        enemy.destroy();
+        enemyEscaped = true;
+      }
+    }
+    if (enemyEscaped) this.checkWaveClear();
+
     if (this.pickup?.active) {
       const dist = Phaser.Math.Distance.Between(
         this.player.x,

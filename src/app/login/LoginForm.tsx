@@ -9,14 +9,26 @@ export function LoginForm() {
   const callbackUrl = searchParams.get("callbackUrl") ?? "/town";
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
+  const [googlePending, setGooglePending] = useState(false);
 
   return (
     <>
       <button
-        onClick={() => signIn("google", { callbackUrl })}
-        style={{ width: "100%", padding: 12, marginTop: 16, cursor: "pointer" }}
+        onClick={() => {
+          if (googlePending) return;
+          setGooglePending(true);
+          signIn("google", { callbackUrl });
+        }}
+        disabled={googlePending}
+        style={{
+          width: "100%",
+          padding: 12,
+          marginTop: 16,
+          cursor: googlePending ? "default" : "pointer",
+          opacity: googlePending ? 0.6 : 1,
+        }}
       >
-        Google로 로그인
+        {googlePending ? "이동 중..." : "Google로 로그인"}
       </button>
 
       <hr style={{ margin: "24px 0" }} />

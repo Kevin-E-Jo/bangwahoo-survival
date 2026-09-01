@@ -387,7 +387,8 @@
       <div class="card">
         <h3>데이터 격리</h3>
         <ul>
-          <li>Supabase RLS로 <code class="field">user_id = auth.uid()</code> 강제</li>
+          <li>Auth.js로 인증하므로 Supabase <code class="field">auth.uid()</code>는 채워지지 않음 — 매 요청 트랜잭션에서 <code class="field">set_config('app.user_id', ...)</code>로 세션 변수 세팅</li>
+          <li>RLS 정책은 <code class="field">app.user_id</code> 기준으로 격리 (<code class="field">supabase/rls.sql</code>, <code class="field">withUserContext.ts</code>)</li>
           <li>클라이언트가 직접 쿼리해도 타인 데이터 접근 불가</li>
         </ul>
       </div>
