@@ -20,13 +20,46 @@
 -- 1차 방어선은 각 API 라우트가 세션을 검사하는 서버 코드이고, 이 RLS는
 -- 그 위의 2차 방어선(defense in depth)이다.
 
-create role app_user noinherit;
+-- LOGIN 없이 role만 만들면 접속 자체가 안 된다. 비밀번호는 이 파일에 커밋하지
+-- 않는다 — role 생성 후 별도로
+--   ALTER ROLE app_user WITH PASSWORD '<비밀 값>';
+-- 를 한 번 실행해서 세팅한다.
+create role app_user with login noinherit;
 grant usage on schema public to app_user;
+
 grant select, insert, update, delete on
   "TownProgress", "InventoryItem", "RunSeed", "RunSubmission"
   to app_user;
--- User/Account/Session/VerificationToken은 Auth.js가 서버 role로만 건드리므로
--- app_user에게는 권한을 주지 않는다 (RLS 대상에서 제외).
+
+-- User/Account/Session/VerificationToken도 app_user 권한이 필요하다 —
+-- Auth.js(PrismaAdapter)는 "서버 전용 role"이 따로 있는 게 아니라 앱이 쓰는
+-- 이 PrismaClient(=DATABASE_URL=app_user)를 그대로 재사용해서 로그인 때마다
+-- 이 테이블들을 읽고 쓴다. 여기 권한을 안 주면 로그인 자체가 깨진다.
+grant select, insert, update, delete on
+  "User", "Account", "Session", "VerificationToken"
+  to app_user;
+
+-- 주의: Supabase는 public 스키마에 테이블이 생기면 기본적으로 RLS를 켠다
+-- (Prisma migrate로 만든 테이블도 예외 없음). 정책을 하나도 안 만들면
+-- "RLS는 켜져 있는데 허용 정책이 없는" 상태가 되어 소유자가 아닌 role은
+-- 아예 접근이 막힌다 — app_user로도 로그인/세션 조회가 통째로 실패한다.
+-- 이 4개 테이블은 app.user_id 기준으로 행을 나눌 수 없다(세션 조회
+-- 시점엔 아직 "누구인지"를 모르므로 — 그걸 알아내는 게 바로 이 조회다)
+-- 그리고 애초에 Auth.js 라우트 핸들러만 건드리는 신뢰된 경로이므로,
+-- app_user에게는 무조건 허용하는 정책을 명시적으로 둔다.
+alter table "User" enable row level security;
+alter table "Account" enable row level security;
+alter table "Session" enable row level security;
+alter table "VerificationToken" enable row level security;
+
+create policy app_user_full_access on "User"
+  for all to app_user using (true) with check (true);
+create policy app_user_full_access on "Account"
+  for all to app_user using (true) with check (true);
+create policy app_user_full_access on "Session"
+  for all to app_user using (true) with check (true);
+create policy app_user_full_access on "VerificationToken"
+  for all to app_user using (true) with check (true);
 
 alter table "TownProgress" enable row level security;
 alter table "InventoryItem" enable row level security;
