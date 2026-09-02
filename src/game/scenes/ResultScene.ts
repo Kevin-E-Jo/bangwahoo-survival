@@ -1,4 +1,5 @@
 import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석 참고
+import { ITEM_LABELS } from "@/lib/game-logic";
 import type { RunEndedPayload } from "../events";
 import { CANVAS_W, CANVAS_H } from "./DungeonScene";
 
@@ -91,8 +92,13 @@ export class ResultScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const itemLines = reward.items.length
-      ? reward.items.map((i) => `${i.itemKey} × ${i.quantity}`).join("\n")
-      : "획득한 파츠 없음";
+      ? reward.items
+          .map((i) => {
+            const label = (ITEM_LABELS as Record<string, { ko: string; icon: string }>)[i.itemKey];
+            return `${label?.icon ?? "📦"} ${label?.ko ?? i.itemKey} × ${i.quantity}`;
+          })
+          .join("\n")
+      : "획득한 잡템 없음";
     this.add
       .text(CANVAS_W / 2, 280, itemLines, {
         fontFamily: "monospace",

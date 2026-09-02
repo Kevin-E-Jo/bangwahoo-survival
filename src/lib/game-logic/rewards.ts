@@ -1,7 +1,7 @@
 import { createRng, rngInt, rngPick } from "./seed";
 import { generateRunPlan } from "./runPlan";
 import type { NodeType } from "./nodemap";
-import { ITEM_KEYS, type ItemKey } from "./catalog";
+import { ITEM_KEYS, itemsByTier, type ItemKey } from "./catalog";
 
 interface NodeRewardRule {
   currency: readonly [min: number, max: number];
@@ -9,13 +9,14 @@ interface NodeRewardRule {
   possibleItems: readonly ItemKey[];
 }
 
+// 흔함/보통은 일반 전투에서, 희귀는 엘리트·파밍에서, 레전드는 파밍(loot)
+// 노드에서만 낮은 확률로 나온다 — 티어 목록 자체는 catalog.ts 소관.
+const COMMON_UNCOMMON = [...itemsByTier("common"), ...itemsByTier("uncommon")];
+const UNCOMMON_RARE = [...itemsByTier("uncommon"), ...itemsByTier("rare")];
+
 const NODE_REWARD_RULES: Record<NodeType, NodeRewardRule> = {
-  combat: { currency: [8, 15], itemChance: 0.5, possibleItems: ["part_spring", "part_barrel"] },
-  elite: {
-    currency: [20, 35],
-    itemChance: 0.9,
-    possibleItems: ["part_spring", "part_barrel", "part_scope"],
-  },
+  combat: { currency: [8, 15], itemChance: 0.5, possibleItems: COMMON_UNCOMMON },
+  elite: { currency: [20, 35], itemChance: 0.9, possibleItems: UNCOMMON_RARE },
   loot: { currency: [15, 25], itemChance: 1, possibleItems: ITEM_KEYS },
   rest: { currency: [0, 0], itemChance: 0, possibleItems: [] },
 };
