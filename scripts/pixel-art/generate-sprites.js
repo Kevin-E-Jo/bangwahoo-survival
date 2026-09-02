@@ -525,17 +525,17 @@ function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, co
   writeDirect("toy_fidget_spinner", g);
 }
 
-// ── ground: 32x8 → 64x16, 흙길 타일(반복 배치 가능) ─────────────────
+// ── ground: 16x16 → 32x32, 정사각 바닥 타일(탑뷰 TileSprite로 사방 반복) ──
 {
   const base = hex("#DCCFA6");
   const dark = hex("#C8B98A");
   const light = hex("#E8DCB8");
-  const g = makeGrid(32, 8);
-  for (let y = 0; y < 8; y++) for (let x = 0; x < 32; x++) g[y][x] = base;
+  const g = makeGrid(16, 16);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) g[y][x] = base;
   const specks = [
-    [3, 1, dark], [9, 2, light], [14, 1, dark], [20, 2, dark],
-    [25, 1, light], [6, 4, light], [17, 4, dark], [28, 3, dark],
-    [2, 5, dark], [22, 5, light],
+    [2, 2, dark], [7, 1, light], [12, 3, dark], [4, 6, light],
+    [10, 7, dark], [14, 9, light], [1, 10, dark], [8, 12, light],
+    [13, 13, dark], [3, 14, light], [6, 9, dark],
   ];
   specks.forEach(([x, y, c]) => setPx(g, x, y, c));
   write("ground", g);
