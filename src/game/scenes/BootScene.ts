@@ -2,7 +2,16 @@ import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석
 import { generatePlaceholderTextures } from "../textures";
 import { CANVAS_W, CANVAS_H } from "./DungeonScene";
 
-const SPRITE_KEYS = ["player", "enemy", "enemy-elite", "bullet", "pickup", "ground"] as const;
+const SPRITE_KEYS = [
+  "player",
+  "player-walk",
+  "enemy",
+  "enemy-walk",
+  "enemy-elite",
+  "bullet",
+  "pickup",
+  "ground",
+] as const;
 
 interface TownProgressResponse {
   upgrades: Record<"weaponDamage" | "weaponAmmo", { level: number }>;

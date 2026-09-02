@@ -70,7 +70,7 @@ function writeDirect(name, grid) {
 // 몸통 실루엣(측면, 오른쪽을 보고 서 있는 자세) — 머리/앞머리/몸통/소매/
 // 반바지/다리/신발을 개별 사각형으로 쌓아 사람 형태를 낸다. 각 캐릭터는
 // 같은 골격에 색·비율만 바꿔서 통일감을 준다.
-function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, collar, shorts, shortsShade, shoe, ink }) {
+function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, collar, shorts, shortsShade, shoe, ink }, walking = false) {
   const { x, y, s } = o; // 좌상단 기준, s = 스케일(1이면 1px 단위)
   const R = (dx0, dy0, dx1, dy1, c) =>
     fillRect(
@@ -106,38 +106,47 @@ function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, co
   // 반바지
   R(1, 19, 9, 22, shorts);
   R(1, 21, 9, 22, shortsShade);
-  // 다리
-  R(2, 23, 4, 25, skin);
-  R(6, 23, 8, 25, skin);
+  // 다리 — walking이면 한쪽은 올리고 한쪽은 내려서 보행감을 낸다(2프레임 걷기)
+  const lift = walking ? 1 : 0;
+  R(2, 23 - lift, 4, 25 - lift, skin);
+  R(6, 23 + lift, 8, 25 + lift, skin);
   // 신발
-  R(1, 26, 4, 27, shoe);
-  R(6, 26, 9, 27, shoe);
+  R(1, 26 - lift, 4, 27 - lift, shoe);
+  R(6, 26 + lift, 9, 27 + lift, shoe);
 }
 
 // ── player: 32x32, 그 시절 골목 아이 캐릭터(민트) ──────────────────────
 {
-  const g = makeGrid(32, 32);
-  drawKid(g, { x: 6, y: 3, s: 1 }, {
+  const palette = {
     hair: hex("#6B4A3A"), hairShade: hex("#523628"),
     skin: hex("#F5E1C8"), skinShade: hex("#E0C4A0"),
     shirt: hex("#4FA98F"), shirtShade: hex("#357A66"), collar: hex("#DCEFE9"),
     shorts: hex("#E8DCB8"), shortsShade: hex("#C8B98A"),
     shoe: hex("#357A66"), ink: hex("#2B2A28"),
-  });
+  };
+  const g = makeGrid(32, 32);
+  drawKid(g, { x: 6, y: 3, s: 1 }, palette);
   writeDirect("player", g);
+  const gw = makeGrid(32, 32);
+  drawKid(gw, { x: 6, y: 3, s: 1 }, palette, true);
+  writeDirect("player-walk", gw);
 }
 
 // ── enemy: 28x28, 골목 상대편 아이(코랄) — 몬스터가 아니라 또래 아이 ────
 {
-  const g = makeGrid(28, 28);
-  drawKid(g, { x: 4, y: 1, s: 1 }, {
+  const palette = {
     hair: hex("#7A4B34"), hairShade: hex("#5C3826"),
     skin: hex("#F5E1C8"), skinShade: hex("#E0C4A0"),
     shirt: hex("#E98A66"), shirtShade: hex("#C4694A"), collar: hex("#FBE3DA"),
     shorts: hex("#EFDCC8"), shortsShade: hex("#D6C2A6"),
     shoe: hex("#C4694A"), ink: hex("#2B2A28"),
-  });
+  };
+  const g = makeGrid(28, 28);
+  drawKid(g, { x: 4, y: 1, s: 1 }, palette);
   writeDirect("enemy", g);
+  const gw = makeGrid(28, 28);
+  drawKid(gw, { x: 4, y: 1, s: 1 }, palette, true);
+  writeDirect("enemy-walk", gw);
 }
 
 // ── enemy-elite: 40x40, "수학익힘책을 방패처럼 든 6학년 보스" ──────────

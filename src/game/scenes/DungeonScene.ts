@@ -23,6 +23,11 @@ const AUTO_TARGET_RANGE = 420; // 이 거리 안의 적만 자동 조준·발사
 const SPAWN_STAGGER_MS = 550;
 const SPAWN_MARGIN = 24; // 화면 가장자리 바로 밖에서 스폰
 
+const WALK_TOGGLE_MS = 150; // 이동 중 idle↔walk 프레임 전환 주기
+const HIT_TINT_MS = 90; // 피격 시 흰색 플래시 지속 시간
+const DEATH_TWEEN_MS = 220; // 사망 시 축소·페이드 연출 길이
+const MUZZLE_FLASH_MS = 70;
+
 interface DungeonInitData {
   seed: string;
   upgrades: { weaponDamage: number; weaponAmmo: number };
@@ -47,6 +52,7 @@ export class DungeonScene extends Phaser.Scene {
   private keyD!: Phaser.Input.Keyboard.Key;
   private keyR!: Phaser.Input.Keyboard.Key;
   private aimLine!: Phaser.GameObjects.Graphics;
+  private muzzleFlash!: Phaser.GameObjects.Arc;
 
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
@@ -92,8 +98,10 @@ export class DungeonScene extends Phaser.Scene {
     this.player = this.physics.add.sprite(CANVAS_W / 2, CANVAS_H / 2, "player");
     this.player.setCollideWorldBounds(true);
     this.player.body?.setSize(20, 28);
+    this.player.setData("baseKey", "player");
 
     this.aimLine = this.add.graphics();
+    this.muzzleFlash = this.add.circle(0, 0, 6, 0xffffff, 0.9).setVisible(false);
 
     this.bullets = this.physics.add.group({ allowGravity: false });
     this.enemies = this.physics.add.group({ allowGravity: false });
@@ -131,7 +139,7 @@ export class DungeonScene extends Phaser.Scene {
   update(time: number) {
     if (this.ended) return;
 
-    this.updateMovement();
+    this.updateMovement(time);
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.startReload();
     this.updateAutoAim(time);
     this.updateEnemyHoming();
@@ -141,7 +149,7 @@ export class DungeonScene extends Phaser.Scene {
 
   // ── 이동(WASD) ───────────────────────────────────────────────
 
-  private updateMovement() {
+  private updateMovement(time: number) {
     const left = this.keyA.isDown || this.cursors.left?.isDown;
     const right = this.keyD.isDown || this.cursors.right?.isDown;
     const up = this.keyW.isDown || this.cursors.up?.isDown;
@@ -156,6 +164,28 @@ export class DungeonScene extends Phaser.Scene {
     this.player.setVelocity(vx * PLAYER_SPEED, vy * PLAYER_SPEED);
     if (vx < 0) this.player.setFlipX(true);
     else if (vx > 0) this.player.setFlipX(false);
+
+    this.updateWalkFrame(this.player, vx !== 0 || vy !== 0, time);
+  }
+
+  /** idle↔walk 텍스처를 주기적으로 토글해 간단한 걷기 연출을 낸다. 걷기
+   * 프레임이 없는 텍스처(예: enemy-elite)는 조용히 건너뛴다. */
+  private updateWalkFrame(sprite: Phaser.Physics.Arcade.Sprite, moving: boolean, time: number) {
+    const baseKey = sprite.getData("baseKey") as string | undefined;
+    if (!baseKey) return;
+    const walkKey = `${baseKey}-walk`;
+    if (!this.textures.exists(walkKey)) return;
+
+    if (!moving) {
+      if (sprite.texture.key !== baseKey) sprite.setTexture(baseKey);
+      sprite.setData("walkToggleAt", 0);
+      return;
+    }
+    const toggleAt = (sprite.getData("walkToggleAt") as number) ?? 0;
+    if (time - toggleAt < WALK_TOGGLE_MS) return;
+    sprite.setData("walkToggleAt", time);
+    const showWalk = sprite.texture.key !== walkKey;
+    sprite.setTexture(showWalk ? walkKey : baseKey);
   }
 
   // ── 자동 조준·발사 ────────────────────────────────────────────
@@ -178,7 +208,7 @@ export class DungeonScene extends Phaser.Scene {
     let closestDist = Infinity;
     for (const enemyObj of this.enemies.getChildren()) {
       const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
-      if (!enemy.active) continue;
+      if (!enemy.active || enemy.getData("dying")) continue;
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, enemy.x, enemy.y);
       if (dist < closestDist) {
         closestDist = dist;
@@ -203,10 +233,23 @@ export class DungeonScene extends Phaser.Scene {
       "bullet",
     ) as Phaser.Physics.Arcade.Image;
     this.physics.velocityFromRotation(angle, BULLET_SPEED, bullet.body!.velocity);
+    this.showMuzzleFlash(angle);
 
     this.ammo -= 1;
     EventBus.emit(CombatEvents.AmmoChanged, { current: this.ammo, max: this.ammoMax });
     if (this.ammo <= 0) this.startReload();
+  }
+
+  /** 발사 순간 총구 앞에 잠깐 뜨는 섬광 — 자동사격이라 타격감을 눈으로
+   * 보여줄 지점이 마땅치 않아서, 발사 자체에 최소한의 피드백을 준다. */
+  private showMuzzleFlash(angle: number) {
+    const dist = 14;
+    this.muzzleFlash.setPosition(
+      this.player.x + Math.cos(angle) * dist,
+      this.player.y + Math.sin(angle) * dist,
+    );
+    this.muzzleFlash.setVisible(true).setAlpha(1);
+    this.time.delayedCall(MUZZLE_FLASH_MS, () => this.muzzleFlash.setVisible(false));
   }
 
   private startReload() {
@@ -222,14 +265,16 @@ export class DungeonScene extends Phaser.Scene {
   // ── 적 이동(플레이어 추적) ────────────────────────────────────
 
   private updateEnemyHoming() {
+    const time = this.time.now;
     for (const enemyObj of this.enemies.getChildren()) {
       const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
-      if (!enemy.active) continue;
+      if (!enemy.active || enemy.getData("dying")) continue;
       const isElite = enemy.getData("isElite") as boolean;
       const speed = isElite ? ELITE_SPEED : ENEMY_SPEED;
       const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
       enemy.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
       enemy.setFlipX(Math.cos(angle) < 0);
+      this.updateWalkFrame(enemy, true, time);
     }
   }
 
@@ -271,19 +316,20 @@ export class DungeonScene extends Phaser.Scene {
     bullet: Phaser.Physics.Arcade.Image,
     enemy: Phaser.Physics.Arcade.Sprite,
   ) {
-    if (!bullet.active || !enemy.active) return;
+    if (!bullet.active || !enemy.active || enemy.getData("dying")) return;
     bullet.destroy();
 
     const hp = (enemy.getData("hp") as number) - this.bulletDamage;
     enemy.setData("hp", hp);
     if (hp <= 0) {
-      enemy.destroy();
-      this.checkWaveClear();
+      this.killEnemy(enemy);
+    } else {
+      this.flashHit(enemy);
     }
   }
 
   private onPlayerHitEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
-    if (this.ended || !enemy.active) return;
+    if (this.ended || !enemy.active || enemy.getData("dying")) return;
     const now = this.time.now;
     if (now - this.lastHitAt < CONTACT_INVULN_MS) return;
     this.lastHitAt = now;
@@ -291,13 +337,46 @@ export class DungeonScene extends Phaser.Scene {
     const isElite = enemy.getData("isElite") as boolean;
     this.hp = Math.max(0, this.hp - CONTACT_DAMAGE[isElite ? "elite" : "combat"]);
     EventBus.emit(CombatEvents.HpChanged, { current: this.hp, max: PLAYER_MAX_HP });
-    enemy.destroy();
+    this.flashHit(this.player);
+    this.killEnemy(enemy);
 
     if (this.hp <= 0) {
       this.endRun("died");
       return;
     }
-    this.checkWaveClear();
+  }
+
+  /** 흰색으로 짧게 물들였다 원래대로 — 총알/접촉 피격 둘 다 재사용. */
+  private flashHit(sprite: Phaser.Physics.Arcade.Sprite) {
+    sprite.setTintFill(0xffffff);
+    this.time.delayedCall(HIT_TINT_MS, () => sprite.clearTint());
+  }
+
+  /** 즉시 destroy하는 대신 살짝 찌그러지며 사라지는 사망 연출을 재생한다.
+   * 연출 중엔 "dying" 플래그로 타겟팅·추적·재판정에서 제외하고, 물리
+   * 충돌도 꺼서 죽은 채로 플레이어를 막거나 총알을 더 맞지 않게 한다.
+   * 애니메이션이 끝나야 실제로 destroy + checkWaveClear를 호출한다 —
+   * 그래야 "마지막 한 마리"가 사라지는 도중에 라운드가 클리어 판정되는
+   * 것도 자연히 방지된다. */
+  private killEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
+    if (enemy.getData("dying")) return;
+    enemy.setData("dying", true);
+    enemy.setVelocity(0, 0);
+    if (enemy.body) (enemy.body as Phaser.Physics.Arcade.Body).enable = false;
+    enemy.setTintFill(0xffffff);
+
+    this.tweens.add({
+      targets: enemy,
+      scale: 0,
+      alpha: 0,
+      angle: Phaser.Math.Between(-90, 90),
+      duration: DEATH_TWEEN_MS,
+      ease: "Cubic.easeIn",
+      onComplete: () => {
+        enemy.destroy();
+        this.checkWaveClear();
+      },
+    });
   }
 
   // ── 라운드 진행 ──────────────────────────────────────────────
@@ -325,6 +404,7 @@ export class DungeonScene extends Phaser.Scene {
         ) as Phaser.Physics.Arcade.Sprite;
         enemy.setData("hp", isElite ? ELITE_HP : ENEMY_HP);
         enemy.setData("isElite", isElite);
+        enemy.setData("baseKey", isElite ? "enemy-elite" : "enemy");
       });
     });
     // 마지막 스폰 이후에도 그룹이 즉시 비어있지 않도록, 스폰 완료 시점에 한 번 더 체크.
