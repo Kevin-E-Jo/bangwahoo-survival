@@ -1,11 +1,10 @@
 import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석 참고
-import { generateRunPlan, computeRunRewards, type NodeType } from "@/lib/game-logic";
+import { generateRunPlan, computeRunRewards, ROUND_COUNT, type RoundPlan } from "@/lib/game-logic";
 import { EventBus } from "../EventBus";
 import { CombatEvents, type RunEndedPayload } from "../events";
 
 export const CANVAS_W = 960;
 export const CANVAS_H = 540;
-const GROUND_Y = 460;
 
 const PLAYER_SPEED = 220;
 const PLAYER_MAX_HP = 100;
@@ -14,15 +13,15 @@ const CONTACT_INVULN_MS = 500;
 
 const ENEMY_SPEED = 70;
 const ENEMY_HP = 20;
-const ELITE_SPEED = 42;
+const ELITE_SPEED = 55;
 const ELITE_HP = 70;
 
 const BULLET_SPEED = 560;
 const FIRE_COOLDOWN_MS = 180;
 const RELOAD_MS = 1100;
-
-const REST_DURATION_MS = 2000;
-const LOOT_COLLECT_RADIUS = 26;
+const AUTO_TARGET_RANGE = 420; // 이 거리 안의 적만 자동 조준·발사한다
+const SPAWN_STAGGER_MS = 550;
+const SPAWN_MARGIN = 24; // 화면 가장자리 바로 밖에서 스폰
 
 interface DungeonInitData {
   seed: string;
@@ -31,22 +30,26 @@ interface DungeonInitData {
 
 type CombatItem = { itemKey: string; quantity: number };
 
+/** 사선 탑뷰 웨이브 서바이벌. 조준·발사는 자동(가장 가까운 적)이고,
+ * 플레이어는 WASD로 2D 평면을 자유 이동한다. 정확히 3라운드 고정 —
+ * 라운드 인덱스별 보상 확률은 game-logic/rewards.ts 소관. */
 export class DungeonScene extends Phaser.Scene {
   private seed!: string;
-  private nodes!: readonly NodeType[];
-  private waveIndex = 0;
+  private rounds!: readonly RoundPlan[];
+  private roundIndex = 0;
   private startedAtMs = 0;
 
   private player!: Phaser.Physics.Arcade.Sprite;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private keyW!: Phaser.Input.Keyboard.Key;
   private keyA!: Phaser.Input.Keyboard.Key;
+  private keyS!: Phaser.Input.Keyboard.Key;
   private keyD!: Phaser.Input.Keyboard.Key;
   private keyR!: Phaser.Input.Keyboard.Key;
   private aimLine!: Phaser.GameObjects.Graphics;
 
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
-  private pickup?: Phaser.Physics.Arcade.Sprite;
 
   private hp = PLAYER_MAX_HP;
   private ammoMax = 6;
@@ -56,8 +59,7 @@ export class DungeonScene extends Phaser.Scene {
   private lastHitAt = -Infinity;
   private bulletDamage = 10;
 
-  private nodeBusy = false; // 현재 노드 처리 중(스폰/휴식) — 중복 진행 방지
-  private nodeType: NodeType = "combat";
+  private roundBusy = false; // 현재 라운드 스폰/진행 중 — 중복 진행 방지
   private cumulativeCurrency = 0;
   private cumulativeItems = new Map<string, number>();
   private ended = false;
@@ -68,9 +70,8 @@ export class DungeonScene extends Phaser.Scene {
 
   init(data: DungeonInitData) {
     this.seed = data.seed;
-    const plan = generateRunPlan(data.seed);
-    this.nodes = plan.nodes;
-    this.waveIndex = 0;
+    this.rounds = generateRunPlan(data.seed).rounds;
+    this.roundIndex = 0;
     this.ended = false;
     this.hp = PLAYER_MAX_HP;
     this.ammoMax = 6 + data.upgrades.weaponAmmo * 2;
@@ -84,16 +85,11 @@ export class DungeonScene extends Phaser.Scene {
     this.startedAtMs = this.time.now;
 
     this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0xf2f3ec);
-    for (let x = 0; x < CANVAS_W; x += 64) {
-      this.add.image(x + 32, GROUND_Y + 24, "ground");
-    }
-    this.add
-      .rectangle(CANVAS_W / 2, GROUND_Y + 40, CANVAS_W, 4, 0xd9dacd)
-      .setOrigin(0.5, 0);
+    this.add.tileSprite(0, 0, CANVAS_W, CANVAS_H, "ground").setOrigin(0, 0);
 
-    this.physics.world.setBounds(0, 0, CANVAS_W, GROUND_Y + 40);
+    this.physics.world.setBounds(0, 0, CANVAS_W, CANVAS_H);
 
-    this.player = this.physics.add.sprite(120, GROUND_Y - 16, "player");
+    this.player = this.physics.add.sprite(CANVAS_W / 2, CANVAS_H / 2, "player");
     this.player.setCollideWorldBounds(true);
     this.player.body?.setSize(20, 28);
 
@@ -115,109 +111,92 @@ export class DungeonScene extends Phaser.Scene {
     const keyboard = this.input.keyboard;
     if (!keyboard) throw new Error("keyboard input unavailable");
     this.cursors = keyboard.createCursorKeys();
+    this.keyW = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
     this.keyA = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+    this.keyS = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.keyR = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
 
-    this.input.on("pointerdown", () => this.tryFire());
-
     this.scene.launch("UIScene", {
-      totalWaves: this.nodes.length,
-      nodes: this.nodes,
+      totalWaves: ROUND_COUNT,
       hp: this.hp,
       hpMax: PLAYER_MAX_HP,
       ammo: this.ammo,
       ammoMax: this.ammoMax,
     });
 
-    this.startNode(0);
+    this.startRound(0);
   }
 
   update(time: number) {
     if (this.ended) return;
 
-    const left = this.cursors.left?.isDown || this.keyA.isDown;
-    const right = this.cursors.right?.isDown || this.keyD.isDown;
-    const vx = left ? -PLAYER_SPEED : right ? PLAYER_SPEED : 0;
-    this.player.setVelocityX(vx);
-    this.player.setFlipX(vx < 0 || (vx === 0 && this.player.flipX));
-
+    this.updateMovement();
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.startReload();
+    this.updateAutoAim(time);
+    this.updateEnemyHoming();
+    this.cleanupOffscreenBullets();
+    this.cleanupEscapedEnemies();
+  }
 
-    const pointer = this.input.activePointer;
+  // ── 이동(WASD) ───────────────────────────────────────────────
+
+  private updateMovement() {
+    const left = this.keyA.isDown || this.cursors.left?.isDown;
+    const right = this.keyD.isDown || this.cursors.right?.isDown;
+    const up = this.keyW.isDown || this.cursors.up?.isDown;
+    const down = this.keyS.isDown || this.cursors.down?.isDown;
+
+    let vx = (right ? 1 : 0) - (left ? 1 : 0);
+    let vy = (down ? 1 : 0) - (up ? 1 : 0);
+    if (vx !== 0 && vy !== 0) {
+      vx *= Math.SQRT1_2;
+      vy *= Math.SQRT1_2;
+    }
+    this.player.setVelocity(vx * PLAYER_SPEED, vy * PLAYER_SPEED);
+    if (vx < 0) this.player.setFlipX(true);
+    else if (vx > 0) this.player.setFlipX(false);
+  }
+
+  // ── 자동 조준·발사 ────────────────────────────────────────────
+
+  private updateAutoAim(time: number) {
+    const target = this.findNearestEnemy();
     this.aimLine.clear();
-    this.aimLine.lineStyle(2, 0x24231f, 0.35);
-    this.aimLine.lineBetween(this.player.x, this.player.y, pointer.worldX, pointer.worldY);
+    if (!target) return;
 
+    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, target.x, target.y);
+    this.aimLine.lineStyle(1.5, 0x24231f, 0.25);
+    this.aimLine.lineBetween(this.player.x, this.player.y, target.x, target.y);
+    if (dist > AUTO_TARGET_RANGE) return;
+
+    this.tryFireAt(target, time);
+  }
+
+  private findNearestEnemy(): Phaser.Physics.Arcade.Sprite | undefined {
+    let closest: Phaser.Physics.Arcade.Sprite | undefined;
+    let closestDist = Infinity;
     for (const enemyObj of this.enemies.getChildren()) {
       const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
       if (!enemy.active) continue;
-      const isElite = enemy.getData("isElite") as boolean;
-      enemy.setVelocityX(isElite ? -ELITE_SPEED : -ENEMY_SPEED);
-    }
-
-    for (const bulletObj of this.bullets.getChildren()) {
-      const bullet = bulletObj as Phaser.Physics.Arcade.Image;
-      if (!bullet.active) continue;
-      if (
-        bullet.x < -16 ||
-        bullet.x > CANVAS_W + 16 ||
-        bullet.y < -16 ||
-        bullet.y > CANVAS_H + 16
-      ) {
-        bullet.destroy();
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, enemy.x, enemy.y);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = enemy;
       }
     }
-
-    // 화면 밖(왼쪽)으로 빠져나간 적은 정리한다 — 그렇지 않으면 플레이어와
-    // 높이가 안 맞아 접촉 판정도, 총알도 맞지 않고 지나간 개체가 영원히
-    // "생존" 상태로 남아 checkWaveClear()가 절대 통과하지 못하고 웨이브가
-    // 멈춰버린다 (실제 테스트 중 발견).
-    let enemyEscaped = false;
-    for (const enemyObj of this.enemies.getChildren()) {
-      const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
-      if (enemy.active && enemy.x < -40) {
-        enemy.destroy();
-        enemyEscaped = true;
-      }
-    }
-    if (enemyEscaped) this.checkWaveClear();
-
-    if (this.pickup?.active) {
-      const dist = Phaser.Math.Distance.Between(
-        this.player.x,
-        this.player.y,
-        this.pickup.x,
-        this.pickup.y,
-      );
-      if (dist <= LOOT_COLLECT_RADIUS) {
-        this.pickup.destroy();
-        this.pickup = undefined;
-        this.clearCurrentNode();
-      }
-    }
-
-    void time;
+    return closest;
   }
 
-  // ── 발사/재장전 ──────────────────────────────────────────────
-
-  private tryFire() {
+  private tryFireAt(target: Phaser.Physics.Arcade.Sprite, time: number) {
     if (this.ended || this.reloading || this.ammo <= 0) {
       if (this.ammo <= 0 && !this.reloading) this.startReload();
       return;
     }
-    const now = this.time.now;
-    if (now - this.lastFiredAt < FIRE_COOLDOWN_MS) return;
-    this.lastFiredAt = now;
+    if (time - this.lastFiredAt < FIRE_COOLDOWN_MS) return;
+    this.lastFiredAt = time;
 
-    const pointer = this.input.activePointer;
-    const angle = Phaser.Math.Angle.Between(
-      this.player.x,
-      this.player.y,
-      pointer.worldX,
-      pointer.worldY,
-    );
+    const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
     const bullet = this.bullets.create(
       this.player.x,
       this.player.y,
@@ -238,6 +217,52 @@ export class DungeonScene extends Phaser.Scene {
       this.reloading = false;
       EventBus.emit(CombatEvents.AmmoChanged, { current: this.ammo, max: this.ammoMax });
     });
+  }
+
+  // ── 적 이동(플레이어 추적) ────────────────────────────────────
+
+  private updateEnemyHoming() {
+    for (const enemyObj of this.enemies.getChildren()) {
+      const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
+      if (!enemy.active) continue;
+      const isElite = enemy.getData("isElite") as boolean;
+      const speed = isElite ? ELITE_SPEED : ENEMY_SPEED;
+      const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+      enemy.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+      enemy.setFlipX(Math.cos(angle) < 0);
+    }
+  }
+
+  private cleanupOffscreenBullets() {
+    for (const bulletObj of this.bullets.getChildren()) {
+      const bullet = bulletObj as Phaser.Physics.Arcade.Image;
+      if (!bullet.active) continue;
+      if (
+        bullet.x < -16 ||
+        bullet.x > CANVAS_W + 16 ||
+        bullet.y < -16 ||
+        bullet.y > CANVAS_H + 16
+      ) {
+        bullet.destroy();
+      }
+    }
+  }
+
+  // 화면 밖으로 완전히 빠져나간 적은 정리한다 — 추적 이동이라 평소엔 거의
+  // 안 벌어지지만, 밀림/겹침 등으로 순간적으로 벗어났을 때 대비한 안전망.
+  // 없으면 그 개체가 영원히 "생존" 상태로 남아 checkWaveClear()가 절대
+  // 통과하지 못하고 라운드가 멈춰버린다 (실제 테스트 중 발견한 버그).
+  private cleanupEscapedEnemies() {
+    let enemyEscaped = false;
+    for (const enemyObj of this.enemies.getChildren()) {
+      const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
+      if (!enemy.active) continue;
+      if (enemy.x < -60 || enemy.x > CANVAS_W + 60 || enemy.y < -60 || enemy.y > CANVAS_H + 60) {
+        enemy.destroy();
+        enemyEscaped = true;
+      }
+    }
+    if (enemyEscaped) this.checkWaveClear();
   }
 
   // ── 충돌 처리 ────────────────────────────────────────────────
@@ -275,74 +300,63 @@ export class DungeonScene extends Phaser.Scene {
     this.checkWaveClear();
   }
 
-  // ── 노드(웨이브) 진행 ────────────────────────────────────────
+  // ── 라운드 진행 ──────────────────────────────────────────────
 
-  private startNode(index: number) {
+  private startRound(index: number) {
     if (this.ended) return;
-    this.waveIndex = index;
-    this.nodeType = this.nodes[index];
-    this.nodeBusy = true;
+    this.roundIndex = index;
+    this.roundBusy = true;
 
-    EventBus.emit(CombatEvents.WaveStarted, {
-      waveIndex: index,
-      totalWaves: this.nodes.length,
-      nodeType: this.nodeType,
-    });
+    EventBus.emit(CombatEvents.WaveStarted, { waveIndex: index, totalWaves: ROUND_COUNT });
 
-    switch (this.nodeType) {
-      case "combat":
-        this.spawnWave(3, false);
-        break;
-      case "elite":
-        this.spawnWave(1, true);
-        break;
-      case "loot":
-        this.spawnPickup();
-        break;
-      case "rest":
-        this.hp = PLAYER_MAX_HP;
-        EventBus.emit(CombatEvents.HpChanged, { current: this.hp, max: PLAYER_MAX_HP });
-        this.time.delayedCall(REST_DURATION_MS, () => this.clearCurrentNode());
-        break;
-    }
-  }
-
-  private spawnWave(count: number, elite: boolean) {
-    for (let i = 0; i < count; i++) {
-      this.time.delayedCall(i * 700, () => {
+    const plan = this.rounds[index];
+    const spawnIsElite: boolean[] = [
+      ...Array<boolean>(plan.enemyCount).fill(false),
+      ...Array<boolean>(plan.eliteCount).fill(true),
+    ];
+    spawnIsElite.forEach((isElite, i) => {
+      this.time.delayedCall(i * SPAWN_STAGGER_MS, () => {
         if (this.ended) return;
-        const y = Phaser.Math.Between(GROUND_Y - 110, GROUND_Y - 16);
+        const { x, y } = this.randomEdgePoint();
         const enemy = this.enemies.create(
-          CANVAS_W + 30,
+          x,
           y,
-          elite ? "enemy-elite" : "enemy",
+          isElite ? "enemy-elite" : "enemy",
         ) as Phaser.Physics.Arcade.Sprite;
-        enemy.setData("hp", elite ? ELITE_HP : ENEMY_HP);
-        enemy.setData("isElite", elite);
+        enemy.setData("hp", isElite ? ELITE_HP : ENEMY_HP);
+        enemy.setData("isElite", isElite);
       });
-    }
+    });
     // 마지막 스폰 이후에도 그룹이 즉시 비어있지 않도록, 스폰 완료 시점에 한 번 더 체크.
-    this.time.delayedCall(count * 700 + 50, () => this.checkWaveClear());
+    this.time.delayedCall(spawnIsElite.length * SPAWN_STAGGER_MS + 50, () => this.checkWaveClear());
   }
 
-  private spawnPickup() {
-    this.pickup = this.physics.add.sprite(CANVAS_W - 120, GROUND_Y - 20, "pickup");
-    this.pickup.setData("bob", 0);
+  /** 화면 가장자리 바로 밖 임의의 지점 — 사방에서 플레이어를 향해 등장한다. */
+  private randomEdgePoint(): { x: number; y: number } {
+    switch (Phaser.Math.Between(0, 3)) {
+      case 0:
+        return { x: Phaser.Math.Between(0, CANVAS_W), y: -SPAWN_MARGIN };
+      case 1:
+        return { x: Phaser.Math.Between(0, CANVAS_W), y: CANVAS_H + SPAWN_MARGIN };
+      case 2:
+        return { x: -SPAWN_MARGIN, y: Phaser.Math.Between(0, CANVAS_H) };
+      default:
+        return { x: CANVAS_W + SPAWN_MARGIN, y: Phaser.Math.Between(0, CANVAS_H) };
+    }
   }
 
   private checkWaveClear() {
-    if (this.ended || !this.nodeBusy) return;
-    if (this.nodeType === "loot" || this.nodeType === "rest") return; // 별도 트리거로 처리
+    if (this.ended || !this.roundBusy) return;
     if (this.enemies.countActive(true) > 0) return;
-    this.clearCurrentNode();
+    this.clearCurrentRound();
   }
 
-  private clearCurrentNode() {
-    if (this.ended || !this.nodeBusy) return;
-    this.nodeBusy = false;
+  private clearCurrentRound() {
+    if (this.ended || !this.roundBusy) return;
+    this.roundBusy = false;
 
-    const clearedCount = this.waveIndex + 1;
-    const before = computeRunRewards(this.seed, this.waveIndex);
+    const clearedCount = this.roundIndex + 1;
+    const before = computeRunRewards(this.seed, this.roundIndex);
     const after = computeRunRewards(this.seed, clearedCount);
     const currencyDelta = after.currency - before.currency;
     const itemDeltas = diffItems(before.items, after.items);
@@ -356,15 +370,15 @@ export class DungeonScene extends Phaser.Scene {
     }
 
     EventBus.emit(CombatEvents.WaveCleared, {
-      waveIndex: this.waveIndex,
+      waveIndex: this.roundIndex,
       loot: { currency: currencyDelta, items: itemDeltas },
     });
 
-    if (clearedCount >= this.nodes.length) {
+    if (clearedCount >= ROUND_COUNT) {
       this.endRun("cleared");
       return;
     }
-    this.time.delayedCall(600, () => this.startNode(this.waveIndex + 1));
+    this.time.delayedCall(600, () => this.startRound(this.roundIndex + 1));
   }
 
   private endRun(result: "cleared" | "died") {
@@ -372,7 +386,7 @@ export class DungeonScene extends Phaser.Scene {
     this.ended = true;
     this.player.setVelocity(0, 0);
 
-    const wavesCleared = result === "cleared" ? this.nodes.length : this.waveIndex;
+    const wavesCleared = result === "cleared" ? ROUND_COUNT : this.roundIndex;
     const collectedItems: CombatItem[] = Array.from(this.cumulativeItems, ([itemKey, quantity]) => ({
       itemKey,
       quantity,

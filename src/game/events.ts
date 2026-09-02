@@ -14,7 +14,6 @@ export interface AmmoChangedPayload {
 export interface WaveStartedPayload {
   waveIndex: number;
   totalWaves: number;
-  nodeType: "combat" | "elite" | "loot" | "rest";
 }
 
 export interface WaveClearedPayload {

@@ -1,15 +1,7 @@
 import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석 참고
-import type { NodeType } from "@/lib/game-logic";
 import { EventBus } from "../EventBus";
 import { CombatEvents, type HpChangedPayload, type AmmoChangedPayload, type WaveStartedPayload, type WaveClearedPayload } from "../events";
 import { CANVAS_W } from "./DungeonScene";
-
-const NODE_LABEL: Record<NodeType, string> = {
-  combat: "전투",
-  elite: "정예",
-  loot: "파밍",
-  rest: "휴식",
-};
 
 /** DungeonScene과 launch()로 병렬 실행되는 HUD 씬. DungeonScene을 직접
  * 참조하지 않고 combat:* 이벤트만 구독한다. */
@@ -19,7 +11,7 @@ export class UIScene extends Phaser.Scene {
   private hpText!: Phaser.GameObjects.Text;
   private ammoText!: Phaser.GameObjects.Text;
   private waveText!: Phaser.GameObjects.Text;
-  private nodeIcons: Phaser.GameObjects.Container[] = [];
+  private roundDots: Phaser.GameObjects.Arc[] = [];
   private lootToast?: Phaser.GameObjects.Text;
 
   private handlers: { event: string; fn: (...args: unknown[]) => void }[] = [];
@@ -28,14 +20,7 @@ export class UIScene extends Phaser.Scene {
     super("UIScene");
   }
 
-  create(data: {
-    totalWaves: number;
-    nodes: readonly NodeType[];
-    hp: number;
-    hpMax: number;
-    ammo: number;
-    ammoMax: number;
-  }) {
+  create(data: { totalWaves: number; hp: number; hpMax: number; ammo: number; ammoMax: number }) {
     const HP_BAR_X = 20;
     const HP_BAR_Y = 18;
     const HP_BAR_W = 200;
@@ -70,7 +55,7 @@ export class UIScene extends Phaser.Scene {
     });
     this.waveText.setOrigin(1, 0);
 
-    this.buildNodeStrip(data.nodes);
+    this.buildRoundDots(data.totalWaves);
 
     this.events.on(Phaser.Scenes.Events.SHUTDOWN, () => this.teardown());
 
@@ -87,8 +72,8 @@ export class UIScene extends Phaser.Scene {
     });
 
     this.subscribe(CombatEvents.WaveStarted, (payload: WaveStartedPayload) => {
-      this.waveText.setText(`웨이브 ${payload.waveIndex + 1} / ${payload.totalWaves} — ${NODE_LABEL[payload.nodeType]}`);
-      this.highlightNode(payload.waveIndex);
+      this.waveText.setText(`라운드 ${payload.waveIndex + 1} / ${payload.totalWaves}`);
+      this.highlightRound(payload.waveIndex);
     });
 
     this.subscribe(CombatEvents.WaveCleared, (payload: WaveClearedPayload) => {
@@ -98,13 +83,13 @@ export class UIScene extends Phaser.Scene {
     });
 
     // 초기값 — launch() 시점 이전에 발행된 combat:* 이벤트는 구독 전이라
-    // 놓치므로, 최초 상태는 launch data로 직접 받는다. 첫 노드는 항상
+    // 놓치므로, 최초 상태는 launch data로 직접 받는다. 첫 라운드는 항상
     // waveIndex 0이므로 wave-started의 최초 발행분도 여기서 재현한다.
     this.hpText.setText(`${data.hp} / ${data.hpMax}`);
     this.ammoText.setText(`탄약: ${data.ammo} / ${data.ammoMax}`);
-    if (data.nodes.length > 0) {
-      this.waveText.setText(`웨이브 1 / ${data.totalWaves} — ${NODE_LABEL[data.nodes[0]]}`);
-      this.highlightNode(0);
+    if (data.totalWaves > 0) {
+      this.waveText.setText(`라운드 1 / ${data.totalWaves}`);
+      this.highlightRound(0);
     }
   }
 
@@ -119,22 +104,18 @@ export class UIScene extends Phaser.Scene {
     this.handlers = [];
   }
 
-  private buildNodeStrip(nodes: readonly NodeType[]) {
-    const startX = CANVAS_W - 20 - nodes.length * 22;
+  private buildRoundDots(totalWaves: number) {
+    const startX = CANVAS_W - 20 - totalWaves * 22;
     const y = 42;
-    this.nodeIcons = nodes.map((type, i) => {
-      const container = this.add.container(startX + i * 22, y);
-      const bg = this.add.circle(0, 0, 7, colorForNode(type), 0.85);
-      container.add(bg);
-      return container;
-    });
+    this.roundDots = Array.from({ length: totalWaves }, (_, i) =>
+      this.add.circle(startX + i * 22, y, 7, 0xd65f3c, 0.85),
+    );
   }
 
-  private highlightNode(index: number) {
-    this.nodeIcons.forEach((container, i) => {
-      const circle = container.list[0] as Phaser.GameObjects.Arc;
-      circle.setScale(i === index ? 1.4 : 1);
-      circle.setAlpha(i < index ? 0.35 : 1);
+  private highlightRound(index: number) {
+    this.roundDots.forEach((dot, i) => {
+      dot.setScale(i === index ? 1.4 : 1);
+      dot.setAlpha(i < index ? 0.35 : 1);
     });
   }
 
@@ -168,18 +149,5 @@ export class UIScene extends Phaser.Scene {
         });
       },
     });
-  }
-}
-
-function colorForNode(type: NodeType): number {
-  switch (type) {
-    case "combat":
-      return 0xd65f3c;
-    case "elite":
-      return 0xb3852a;
-    case "loot":
-      return 0xf5e9ce;
-    case "rest":
-      return 0x2f8f79;
   }
 }

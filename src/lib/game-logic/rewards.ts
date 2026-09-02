@@ -1,25 +1,31 @@
 import { createRng, rngInt, rngPick } from "./seed";
-import { generateRunPlan } from "./runPlan";
-import type { NodeType } from "./nodemap";
-import { ITEM_KEYS, itemsByTier, type ItemKey } from "./catalog";
+import { ROUND_COUNT } from "./runPlan";
+import { itemsByTier, type ItemKey } from "./catalog";
 
-interface NodeRewardRule {
+interface RoundRewardRule {
   currency: readonly [min: number, max: number];
   itemChance: number; // 0..1
   possibleItems: readonly ItemKey[];
+  bonusChance?: number; // 0..1 — 3라운드 전용 고티어 보너스 굴림
+  bonusItems?: readonly ItemKey[];
 }
 
-// 흔함/보통은 일반 전투에서, 희귀는 엘리트·파밍에서, 레전드는 파밍(loot)
-// 노드에서만 낮은 확률로 나온다 — 티어 목록 자체는 catalog.ts 소관.
+// 티어 목록 자체는 catalog.ts 소관. 1·2라운드는 흔함·보통만 나오고,
+// 3라운드는 같은 확률 위에 희귀·레전드 보너스를 한 번 더 굴린다.
 const COMMON_UNCOMMON = [...itemsByTier("common"), ...itemsByTier("uncommon")];
-const UNCOMMON_RARE = [...itemsByTier("uncommon"), ...itemsByTier("rare")];
+const RARE_LEGEND = [...itemsByTier("rare"), ...itemsByTier("legend")];
 
-const NODE_REWARD_RULES: Record<NodeType, NodeRewardRule> = {
-  combat: { currency: [8, 15], itemChance: 0.5, possibleItems: COMMON_UNCOMMON },
-  elite: { currency: [20, 35], itemChance: 0.9, possibleItems: UNCOMMON_RARE },
-  loot: { currency: [15, 25], itemChance: 1, possibleItems: ITEM_KEYS },
-  rest: { currency: [0, 0], itemChance: 0, possibleItems: [] },
-};
+const ROUND_REWARD_RULES: readonly RoundRewardRule[] = [
+  { currency: [8, 15], itemChance: 0.6, possibleItems: COMMON_UNCOMMON },
+  { currency: [12, 20], itemChance: 0.7, possibleItems: COMMON_UNCOMMON },
+  {
+    currency: [20, 35],
+    itemChance: 0.9,
+    possibleItems: COMMON_UNCOMMON,
+    bonusChance: 0.35,
+    bonusItems: RARE_LEGEND,
+  },
+];
 
 export type RunResult = "cleared" | "died";
 
@@ -29,27 +35,30 @@ export interface RunRewards {
 }
 
 /**
- * seed + 실제로 클리어한 웨이브 수로부터 보상을 서버가 독립적으로 재계산한다.
- * 클라이언트가 주장하는 아이템/재화 값은 절대 신뢰하지 않는다 — wavesCleared만
- * (템플릿 길이로 clamp한 뒤) 입력으로 쓰고, 나머지는 이 함수가 seed로부터
- * 전부 다시 굴린다. 죽어서 런이 끝난 경우("died") 아직 클리어하지 못한
- * 웨이브의 보상은 clamp된 wavesCleared에 애초에 포함되지 않으므로 자연히
- * 손실 처리된다 (소프트 페널티) — result 자체는 계산에 필요 없다.
+ * seed + 실제로 클리어한 라운드 수로부터 보상을 서버가 독립적으로
+ * 재계산한다. 클라이언트가 주장하는 아이템/재화 값은 절대 신뢰하지 않는다
+ * — roundsCleared만(ROUND_COUNT로 clamp한 뒤) 입력으로 쓰고, 나머지는 이
+ * 함수가 seed로부터 전부 다시 굴린다. 죽어서 런이 끝난 경우("died") 아직
+ * 클리어하지 못한 라운드의 보상은 clamp된 roundsCleared에 애초에 포함되지
+ * 않으므로 자연히 손실 처리된다 (소프트 페널티) — result 자체는 계산에
+ * 필요 없다.
  */
-export function computeRunRewards(seed: string, wavesCleared: number): RunRewards {
-  const plan = generateRunPlan(seed);
-  const clearedCount = Math.max(0, Math.min(wavesCleared, plan.waveCount));
+export function computeRunRewards(seed: string, roundsCleared: number): RunRewards {
+  const clearedCount = Math.max(0, Math.min(roundsCleared, ROUND_COUNT));
 
   const rng = createRng(seed, "rewards");
   let currency = 0;
   const itemTotals = new Map<ItemKey, number>();
 
   for (let i = 0; i < clearedCount; i++) {
-    const nodeType = plan.nodes[i];
-    const rule = NODE_REWARD_RULES[nodeType];
+    const rule = ROUND_REWARD_RULES[i];
     currency += rngInt(rng, rule.currency[0], rule.currency[1]);
     if (rule.possibleItems.length > 0 && rng() < rule.itemChance) {
       const item = rngPick(rng, rule.possibleItems);
+      itemTotals.set(item, (itemTotals.get(item) ?? 0) + 1);
+    }
+    if (rule.bonusChance && rule.bonusItems && rng() < rule.bonusChance) {
+      const item = rngPick(rng, rule.bonusItems);
       itemTotals.set(item, (itemTotals.get(item) ?? 0) + 1);
     }
   }

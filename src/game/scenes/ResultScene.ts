@@ -35,7 +35,7 @@ export class ResultScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.add
-      .text(CANVAS_W / 2, 130, `${this.runResult.wavesCleared}개 노드 클리어`, {
+      .text(CANVAS_W / 2, 130, `${this.runResult.wavesCleared}라운드 클리어`, {
         fontFamily: "sans-serif",
         fontSize: "15px",
         color: "#a6a798",
