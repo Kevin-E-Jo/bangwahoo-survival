@@ -182,6 +182,55 @@ function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, co
   writeDirect("enemy-elite", g);
 }
 
+// ── 엄폐물(24x24, direct) — 골목/놀이터 소품, 이동·총알 둘 다 막는다 ─────
+
+// 박스 — 접힌 자국이 있는 종이상자
+{
+  const g = makeGrid(24, 24);
+  const box = hex("#D6C2A6");
+  const boxShade = hex("#B39A78");
+  const fold = hex("#8A7355");
+  fillRect(g, 2, 4, 21, 21, box);
+  fillRect(g, 2, 14, 21, 21, boxShade);
+  fillRect(g, 2, 4, 21, 5, fold); // 위 테이프 자국
+  fillRect(g, 10, 4, 13, 21, fold); // 세로 접힌 선
+  writeDirect("obstacle_box", g);
+}
+
+// 화분 — 테라코타 화분 + 초록 잎
+{
+  const g = makeGrid(24, 24);
+  const pot = hex("#D68A5C");
+  const potShade = hex("#B06A3E");
+  const rim = hex("#E8AE82");
+  const leaf = hex("#5DAE7A");
+  const leafShade = hex("#3F8A5C");
+  for (let y = 10; y <= 21; y++) {
+    const inset = Math.round(((y - 10) / 11) * 3);
+    fillRect(g, 3 + inset, y, 20 - inset, y, y >= 17 ? potShade : pot);
+  }
+  fillRect(g, 2, 9, 21, 11, rim);
+  [[7, 8], [12, 5], [17, 8]].forEach(([lx, ly], i) => {
+    fillEllipse(g, lx, ly, 4, 5, () => (i === 1 ? leaf : leafShade));
+  });
+  writeDirect("obstacle_planter", g);
+}
+
+// 벤치 — 나무 판자 + 다리
+{
+  const g = makeGrid(24, 24);
+  const wood = hex("#C89B6A");
+  const woodShade = hex("#A67C4E");
+  const leg = hex("#6B4A3A");
+  fillRect(g, 1, 6, 22, 10, wood);
+  fillRect(g, 1, 9, 22, 10, woodShade);
+  fillRect(g, 1, 13, 22, 16, wood);
+  fillRect(g, 1, 15, 22, 16, woodShade);
+  fillRect(g, 2, 17, 4, 21, leg);
+  fillRect(g, 19, 17, 21, 21, leg);
+  writeDirect("obstacle_bench", g);
+}
+
 // ── bullet: 4x4 → 8x8, BB탄 ────────────────────────────────────────
 {
   const body = hex("#ECE7D5");

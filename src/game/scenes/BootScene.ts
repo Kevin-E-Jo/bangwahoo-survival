@@ -11,6 +11,9 @@ const SPRITE_KEYS = [
   "bullet",
   "pickup",
   "ground",
+  "obstacle_box",
+  "obstacle_planter",
+  "obstacle_bench",
 ] as const;
 
 interface TownProgressResponse {

@@ -2,6 +2,13 @@ import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석
 import { generateRunPlan, computeRunRewards, ROUND_COUNT, type RoundPlan } from "@/lib/game-logic";
 import { EventBus } from "../EventBus";
 import { CombatEvents, type RunEndedPayload } from "../events";
+import { pickMapLayout, type ObstacleType } from "../maps";
+
+const OBSTACLE_TEXTURE: Record<ObstacleType, string> = {
+  box: "obstacle_box",
+  planter: "obstacle_planter",
+  bench: "obstacle_bench",
+};
 
 export const CANVAS_W = 960;
 export const CANVAS_H = 540;
@@ -56,6 +63,7 @@ export class DungeonScene extends Phaser.Scene {
 
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
+  private obstacles!: Phaser.Physics.Arcade.StaticGroup;
 
   private hp = PLAYER_MAX_HP;
   private ammoMax = 6;
@@ -95,6 +103,12 @@ export class DungeonScene extends Phaser.Scene {
 
     this.physics.world.setBounds(0, 0, CANVAS_W, CANVAS_H);
 
+    this.obstacles = this.physics.add.staticGroup();
+    const mapLayout = pickMapLayout(this.seed);
+    for (const o of mapLayout.obstacles) {
+      this.obstacles.create(o.x, o.y, OBSTACLE_TEXTURE[o.type]);
+    }
+
     this.player = this.physics.add.sprite(CANVAS_W / 2, CANVAS_H / 2, "player");
     this.player.setCollideWorldBounds(true);
     this.player.body?.setSize(20, 28);
@@ -105,6 +119,15 @@ export class DungeonScene extends Phaser.Scene {
 
     this.bullets = this.physics.add.group({ allowGravity: false });
     this.enemies = this.physics.add.group({ allowGravity: false });
+
+    // 엄폐물은 이동과 총알을 둘 다 막는다 — 적에게 원거리 공격이 없어서, 이게
+    // "은폐/엄폐"가 실질적인 의미를 가지는 유일한 방식이다(플레이어가 사선을
+    // 끊어 추격을 따돌리거나, 자기 총알도 막힌다는 트레이드오프를 진다).
+    this.physics.add.collider(this.player, this.obstacles);
+    this.physics.add.collider(this.enemies, this.obstacles);
+    this.physics.add.collider(this.bullets, this.obstacles, (bulletObj) => {
+      (bulletObj as Phaser.Physics.Arcade.Image).destroy();
+    });
 
     this.physics.add.overlap(this.bullets, this.enemies, (bulletObj, enemyObj) => {
       this.onBulletHitEnemy(
