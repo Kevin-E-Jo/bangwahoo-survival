@@ -2,6 +2,8 @@ import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석
 import { generatePlaceholderTextures } from "../textures";
 import { CANVAS_W, CANVAS_H } from "./DungeonScene";
 
+const SPRITE_KEYS = ["player", "enemy", "enemy-elite", "bullet", "pickup", "ground"] as const;
+
 interface TownProgressResponse {
   upgrades: Record<"weaponDamage" | "weaponAmmo", { level: number }>;
 }
@@ -17,10 +19,18 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload() {
-    generatePlaceholderTextures(this);
+    for (const key of SPRITE_KEYS) {
+      this.load.image(key, `/assets/sprites/${key}.png`);
+    }
+    this.load.on("loaderror", (file: { key: string }) => {
+      // 이유: 스프라이트 로드가 실패해도(예: 배포 경로 문제) 절차 생성
+      // placeholder로 안전하게 넘어가야 전투가 완전히 막히지 않는다.
+      console.error(`[BootScene] sprite load failed: ${file.key}`);
+    });
   }
 
   create() {
+    generatePlaceholderTextures(this); // 로드 실패한 키만 채우는 안전망(성공한 키는 건너뜀)
     this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0xf2f3ec);
     this.statusText = this.add
       .text(CANVAS_W / 2, CANVAS_H / 2, "던전 입장 준비 중...", {
