@@ -156,7 +156,7 @@
     <div class="stats">
       <div class="stat"><span class="n">5–10분</span><span class="l">런 세션 길이</span></div>
       <div class="stat"><span class="n">2–3주</span><span class="l">개발 기간</span></div>
-      <div class="stat"><span class="n">8–12</span><span class="l">런당 노드 (MVP 3–4)</span></div>
+      <div class="stat"><span class="n">3</span><span class="l">런당 라운드 (고정)</span></div>
       <div class="stat"><span class="n">PC 웹</span><span class="l">1순위 플랫폼</span></div>
     </div>
   </header>
@@ -275,7 +275,7 @@
         <span class="badge phaser">phaser</span>
         <p class="name">DungeonScene + UIScene</p>
         <ul>
-          <li>발급받은 seed로 고정 템플릿 중 노드맵 결정, 사이드뷰 이동·조준·발사</li>
+          <li>발급받은 seed로 라운드별 적 수 결정(정확히 3라운드), 사선 탑뷰 WASD 이동 + 자동 조준·발사</li>
           <li>UIScene은 <code class="field">launch()</code>로 병렬 실행, <code class="field">combat:*</code> 이벤트로 HUD 갱신</li>
           <li>종료 시 <code class="field">combat:run-ended</code> 발행 → ResultScene 전환 (실패 시 소프트 페널티)</li>
         </ul>
@@ -325,7 +325,7 @@
 
     <div class="callout">
       <p class="eyebrow">시드 &amp; 검증 로직 공유</p>
-      <p>노드맵·웨이브 보상을 seed로부터 결정하는 함수는 클라이언트(Phaser)와 서버(API route)가 <strong>같은 TypeScript 모듈을 import</strong>해서 써야 한다. 로직이 갈라지면 서버 재계산이 클라이언트 결과와 어긋나 정상 플레이도 검증에 실패할 수 있다.</p>
+      <p>라운드 구성(적 수)·보상을 seed로부터 결정하는 함수는 클라이언트(Phaser)와 서버(API route)가 <strong>같은 TypeScript 모듈을 import</strong>해서 써야 한다. 로직이 갈라지면 서버 재계산이 클라이언트 결과와 어긋나 정상 플레이도 검증에 실패할 수 있다.</p>
     </div>
   </section>
 
@@ -343,15 +343,16 @@
       <div class="card">
         <h3>전투</h3>
         <ul>
-          <li>사이드뷰 BB탄 서바이벌 슈팅</li>
-          <li>고정 해상도 캔버스 + 레터박스, PC 키보드·마우스 우선</li>
+          <li>사선 탑뷰(심플 톱다운 + 각도 아트), BB탄 서바이벌 슈팅</li>
+          <li>WASD 8방향 이동, 조준·발사는 가장 가까운 적 자동 타겟팅</li>
+          <li>고정 해상도 캔버스, PC 키보드 우선(마우스 불필요)</li>
         </ul>
       </div>
       <div class="card">
         <h3>절차 생성</h3>
         <ul>
-          <li>고정 노드맵 템플릿 중 런마다 랜덤 선택</li>
-          <li>구역 1개로 시작, 노드 8–12개(MVP는 3–4개)</li>
+          <li>정확히 3라운드 고정 — 라운드별 적 수만 시드로 결정</li>
+          <li>적은 화면 가장자리에서 등장해 플레이어를 추적</li>
         </ul>
       </div>
       <div class="card">
@@ -459,8 +460,8 @@
       <table>
         <thead><tr><th>구분</th><th>항목</th></tr></thead>
         <tbody>
-          <tr><td>Must-have</td><td>코어 전투 1종 · 노드 3–4개 런 · 업그레이드 1–2종 · Google 로그인 · 마을 진행도 저장</td></tr>
-          <tr><td>Nice-to-have</td><td>노드 8–12개 확장 · 정교한 서버 검증 · BGM/SFX</td></tr>
+          <tr><td>Must-have</td><td>코어 전투 1종(탑뷰·WASD·자동조준) · 3라운드 고정 런 · 업그레이드 1–2종 · Google 로그인 · 마을 진행도 저장</td></tr>
+          <tr><td>Nice-to-have</td><td>정교한 서버 검증 · BGM/SFX</td></tr>
           <tr><td>진행 중</td><td>아이템 판매(재화 전환) API·UI — TownScene 세션 담당</td></tr>
           <tr class="cut"><td>Cut</td><td>구역 2개 이상 · 모바일 대응 · 적 종류 다양화·보스전 · 리더보드 · 실시간 멀티</td></tr>
         </tbody>
