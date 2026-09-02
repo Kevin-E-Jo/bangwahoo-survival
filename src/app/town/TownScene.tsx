@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { UpgradeType } from "@/lib/game-logic";
 import { UpgradePanel, type UpgradeInfo } from "./UpgradePanel";
+import { InventoryPanel } from "./InventoryPanel";
 import { SignOutButton } from "./SignOutButton";
-import { itemLabel } from "./content";
 import { CoinIcon } from "./CoinIcon";
 import styles from "./town.module.css";
 
@@ -97,24 +97,7 @@ export function TownScene() {
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>인벤토리</h2>
         {progress ? (
-          progress.inventory.length === 0 ? (
-            <p className={styles.emptyState}>보유한 파츠가 없습니다. 던전에서 파밍해오세요.</p>
-          ) : (
-            <div className={styles.inventoryGrid}>
-              {progress.inventory.map((item) => {
-                const label = itemLabel(item.itemKey);
-                return (
-                  <div key={item.itemKey} className={styles.inventoryItem}>
-                    <div className={styles.inventoryIcon} aria-hidden>
-                      {label.icon}
-                    </div>
-                    <div className={styles.inventoryName}>{label.name}</div>
-                    <div className={styles.inventoryQty}>×{item.quantity}</div>
-                  </div>
-                );
-              })}
-            </div>
-          )
+          <InventoryPanel inventory={progress.inventory} onChanged={load} />
         ) : (
           <div className={styles.inventoryGrid}>
             {[0, 1, 2].map((i) => (
