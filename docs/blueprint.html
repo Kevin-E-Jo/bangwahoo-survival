@@ -337,7 +337,7 @@
         <h3>루프</h3>
         <ul>
           <li>마을 ↔ 던전 순환형, 한 런 5–10분</li>
-          <li>목표: 웨이브를 버티며 무기 파츠·재화 파밍</li>
+          <li>목표: 웨이브를 버티며 잡템(그 시절 장난감)·재화 파밍 → 마을에서 판매해 무기 업그레이드</li>
         </ul>
       </div>
       <div class="card">
@@ -420,7 +420,7 @@
         <tbody>
           <tr><td class="mono">User / Account / Session</td><td>Auth.js 표준 스키마</td><td>Google·매직링크 공용</td></tr>
           <tr><td class="mono">TownProgress</td><td>재화, 무기 업그레이드 레벨</td><td>영구 저장 대상</td></tr>
-          <tr><td class="mono">Inventory</td><td>보유 무기 파츠 · 수집품</td><td>영구 저장 대상</td></tr>
+          <tr><td class="mono">Inventory</td><td>보유 잡템(그 시절 장난감 22종, 4티어)</td><td>영구 저장 대상 — 마을에서 판매해 재화로 전환</td></tr>
           <tr><td class="mono">RunSubmission</td><td>시드, 클라이언트 결과, 검증 상태</td><td>영구 보관 불필요 — 검증 즉시 처리</td></tr>
         </tbody>
       </table>
@@ -433,12 +433,15 @@
     <div class="grid">
       <div class="card">
         <h3>세계관</h3>
-        <ul><li>스마트폰 없던 시절의 방과 후 골목·놀이터</li></ul>
+        <ul>
+          <li>스마트폰 없던 시절의 방과 후 골목·놀이터</li>
+          <li>적은 몬스터가 아니라 또래 아이들 — 엘리트는 "수학익힘책을 방패로 든 6학년 보스"</li>
+        </ul>
       </div>
       <div class="card">
         <h3>아트 스타일</h3>
         <ul>
-          <li>아웃라인 없는 소프트 픽셀</li>
+          <li>아웃라인 없는 소프트 픽셀 — 실제 스프라이트 22종+캐릭터 3종 구현 완료(<code class="field">public/assets/sprites/</code>)</li>
           <li>타일 16–32px, 팔레트 32색 이하</li>
         </ul>
       </div>
@@ -457,7 +460,8 @@
         <thead><tr><th>구분</th><th>항목</th></tr></thead>
         <tbody>
           <tr><td>Must-have</td><td>코어 전투 1종 · 노드 3–4개 런 · 업그레이드 1–2종 · Google 로그인 · 마을 진행도 저장</td></tr>
-          <tr><td>Nice-to-have</td><td>매직링크 로그인 · 노드 8–12개 확장 · 무기 파츠 다양화 · 정교한 서버 검증 · BGM/SFX</td></tr>
+          <tr><td>Nice-to-have</td><td>노드 8–12개 확장 · 정교한 서버 검증 · BGM/SFX</td></tr>
+          <tr><td>진행 중</td><td>아이템 판매(재화 전환) API·UI — TownScene 세션 담당</td></tr>
           <tr class="cut"><td>Cut</td><td>구역 2개 이상 · 모바일 대응 · 적 종류 다양화·보스전 · 리더보드 · 실시간 멀티</td></tr>
         </tbody>
       </table>
@@ -482,10 +486,10 @@
       <p class="eyebrow">병렬 작업 전 확인</p>
       <p>아래는 아직 잠기지 않은 결정이다. 여기 의존하는 작업을 먼저 시작한다면, 임시 가정을 이 문서에 함께 적어두고 진행할 것.</p>
       <ul>
-        <li>적(몬스터) 디자인 컨셉 — 실제 상대 아이들 vs 상상 속 재해석 vs 하이브리드, 보류 중</li>
-        <li>무기 파츠 종류·밸런스 디테일 — 업그레이드 1–2종만 확정, 나머지 미정</li>
+        <li>아이템 판매(재화 전환) API·UI — TownScene 세션 진행 중, <code class="field">itemSellPrice()</code>는 이미 있음</li>
         <li>DB 스키마 세부 필드 — 테이블 단위만 확정, 컬럼 설계는 미정</li>
       </ul>
+      <p class="lede" style="margin-top:12px">해결됨: 적 디자인(몬스터 → 또래 아이 + 6학년 보스), 드롭 아이템 종류·밸런스(22종 4티어).</p>
     </div>
   </section>
 
