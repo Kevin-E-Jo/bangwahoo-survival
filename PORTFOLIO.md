@@ -2,7 +2,8 @@
 
 > 이 문서는 포트폴리오 열람용으로, 프로젝트 개요·구성·개발 로그를 한 곳에 모아둔다.
 > 작업이 진행될 때마다 계속 갱신한다. 팀 내부 설계/할 일 문서는
-> [docs/blueprint.html](./docs/blueprint.html), 개발 온보딩은 [README.md](./README.md) 참고.
+> [docs/blueprint.html](./docs/blueprint.html), 개발 온보딩은 [README.md](./README.md),
+> 병렬 세션 개발 방법론은 [docs/METHODOLOGY.md](./docs/METHODOLOGY.md) 참고.
 >
 > `feature/*` worktree에서 병렬로 작업하는 각 세션도 의미 있는 변경을 마칠
 > 때마다 이 문서의 개발 로그를 직접 갱신한다(각 worktree의 `CLAUDE.md` 참고).
@@ -103,6 +104,9 @@ docs/blueprint.html   팀 내부 설계 문서
 
 최신 항목이 위로 온다.
 
+- **2026-09-03** — 병렬 세션 워크플로우에서 실제로 효과가 있었던 설계·개발
+  원칙을 [docs/METHODOLOGY.md](./docs/METHODOLOGY.md)로 정형화. 각 worktree의
+  `CLAUDE.md`가 세션 시작 시 이 문서를 필독하도록 강제.
 - **2026-09-03** — 전투 씬에 엄폐물(박스/화분/벤치) 및 맵 4종 추가. 엄폐물은 이동과
   총알을 모두 차단하도록 설계, 런 시드 기반으로 맵 패턴 결정. 실제 실행 중인 게임에
   물리 충돌을 직접 조작해 플레이어/몹/총알이 장애물에 막히는 것을 확인. ([PR #5](https://github.com/Kevin-E-Jo/bangwahoo-survival/pull/5))
