@@ -3,6 +3,11 @@
 > 이 문서는 포트폴리오 열람용으로, 프로젝트 개요·구성·개발 로그를 한 곳에 모아둔다.
 > 작업이 진행될 때마다 계속 갱신한다. 팀 내부 설계/할 일 문서는
 > [docs/blueprint.html](./docs/blueprint.html), 개발 온보딩은 [README.md](./README.md) 참고.
+>
+> `feature/*` worktree에서 병렬로 작업하는 각 세션도 의미 있는 변경을 마칠
+> 때마다 이 문서의 개발 로그를 직접 갱신한다(각 worktree의 `CLAUDE.md` 참고).
+> 이 파일은 `master`에만 있으므로, 갱신은 항상 루트 worktree
+> (`C:\Users\whdms\Desktop\방과후 서바이벌`)를 대상으로 한다.
 
 ## 한 줄 소개
 
