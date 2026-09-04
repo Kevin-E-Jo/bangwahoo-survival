@@ -368,8 +368,8 @@
 
   <section id="upgrades">
     <p class="eyebrow">Design draft · not yet implemented</p>
-    <h2>업그레이드 시스템 — 런 한정 빌드 강화 (설계 초안)</h2>
-    <p class="lede">다른 로그라이크처럼, 런 진행 중에 멀티샷·도탄·속성탄 같은 강화를 골라 그 런만의 빌드를 만드는 시스템. <strong>아직 구현 전 — 첨삭·수정을 받기 위한 초안이다.</strong> 마을에서 재화로 사는 영구 업그레이드(탄환 위력·탄창 용량)와는 완전히 별개이며, 런이 끝나면 초기화된다.</p>
+    <h2>업그레이드 시스템 — 런 한정 빌드 강화 (설계 확정 · 구현 대기)</h2>
+    <p class="lede">다른 로그라이크처럼, 런 진행 중에 강화를 골라 그 런만의 빌드를 만드는 시스템. 첨삭을 거쳐 세부까지 확정됐고, <strong>아직 코드는 한 줄도 안 들어간 상태</strong>다. 마을에서 재화로 사는 영구 업그레이드(탄환 위력·탄창 용량)와는 완전히 별개이며, 런이 끝나면 초기화된다.</p>
 
     <h3 style="margin-top:8px">선택 시점 &amp; 흐름 <span class="badge done">확정</span></h3>
     <p class="lede">기존에 이미 있는 라운드 클리어 흐름(<code class="field">combat:wave-cleared</code> → 600ms 뒤 다음 라운드)에 선택 단계를 끼워 넣는다. <strong>런당 3회로 확정</strong> — 전투가 늘어지는 걸 피하려고 라운드 수를 늘리거나 라운드 중간 픽업을 섞지 않기로 함.</p>
@@ -383,7 +383,7 @@
         </tbody>
       </table>
     </div>
-    <p class="lede">선택 UI가 뜨는 동안 <code class="field">DungeonScene</code>은 <code class="field">scene.pause()</code>로 정지, 선택 완료 시 재개 — 기존 <code class="field">UIScene</code>과 같은 패턴(병렬 launch + 이벤트)으로 새 씬(가칭 <code class="field">UpgradeChoiceScene</code>)을 추가하는 안을 제안한다.</p>
+    <p class="lede">선택 UI가 뜨는 동안 <code class="field">DungeonScene</code>은 <code class="field">scene.pause()</code>로 정지, 선택 완료 시 재개 — 기존 <code class="field">UIScene</code>과 같은 패턴(병렬 launch + 이벤트)으로 새 씬(가칭 <code class="field">UpgradeChoiceScene</code>)을 추가하는 안을 제안한다. 연출은 <strong>그 시절 테마로 확정</strong> — 평범한 카드 3장 나열이 아니라, 가챠캡슐(<code class="field">gacha_capsule</code> 아이템으로 이미 있음) 3개가 놓여있다가 고른 캡슐이 열리며 내용물이 드러나는 식의 연출을 제안. 아트·애니메이션 작업이 추가로 필요하다.</p>
 
     <h3 style="margin-top:28px">카테고리 개요</h3>
     <div class="grid">
@@ -399,15 +399,16 @@
       </div>
       <div class="card">
         <span class="badge done">속성탄계</span>
-        <p class="name">불(지속딜) · 물(슬로우) · (확장 여지)</p>
+        <p class="name">폭죽탄(지속딜) · 물풍선탄(슬로우) · (확장 여지)</p>
         <ul><li>명중 시 부가 효과 부여 — 적 데이터에 상태(status) 필드가 새로 필요한 유일한 카테고리</li></ul>
       </div>
     </div>
 
     <h3 style="margin-top:28px">발사 패턴계 상세</h3>
+    <p class="lede">이름은 이 프로젝트의 "그 시절" 톤에 맞춘 1차 초안 — 아이템 카탈로그의 구슬·팽이·요요·딱총처럼 실제 있던 놀이·문방구에서 따왔다. 마음에 안 들면 언제든 갈아엎어도 되는 부분.</p>
     <div class="grid">
       <div class="card">
-        <p class="name">멀티샷 (Multishot)</p>
+        <p class="name">고무줄 연사 <span class="badge">Multishot</span></p>
         <ul>
           <li>발사할 때마다 총알 개수 +1, 부채꼴로 균등 확산(각도 간격 15°)</li>
           <li>스택 가능 — 최대 3회 중첩(기본 1발 → 최대 4발)</li>
@@ -415,58 +416,59 @@
         </ul>
       </div>
       <div class="card">
-        <p class="name">더블샷 (Double Shot)</p>
+        <p class="name">쌍딱총 <span class="badge">Double Shot</span></p>
         <ul>
           <li>멀티샷과 달리 확산 없이, 같은 방향으로 정확히 겹쳐서 1발 더 발사(약 80ms 지연)</li>
           <li>스택 불가(유니크) — 명중률 손해 없이 화력만 2배가 되는 대신 흔치 않게</li>
-          <li>멀티샷과는 서로 곱연산(스택마다 총알 수를 배로 늘리는 게 아니라 "동시 발사 세트" 자체를 한 번 더 쏘는 것)으로 상호작용 — 구현 시 발사 함수를 "이번에 만들 총알들의 각도 배열"로 리팩터링해두면 두 효과가 자연스럽게 합성된다</li>
+          <li>고무줄 연사와는 서로 곱연산(스택마다 총알 수를 배로 늘리는 게 아니라 "동시 발사 세트" 자체를 한 번 더 쏘는 것)으로 상호작용 — 구현 시 발사 함수를 "이번에 만들 총알들의 각도 배열"로 리팩터링해두면 두 효과가 자연스럽게 합성된다</li>
         </ul>
       </div>
       <div class="card">
-        <p class="name">도탄 (Ricochet)</p>
+        <p class="name">비석치기 <span class="badge">Ricochet</span> <span class="badge done">확정</span></p>
         <ul>
-          <li>적 명중 후 사라지지 않고, 반경 안의 가장 가까운 다른 적으로 1회 튕겨 재타격(데미지 70%)</li>
-          <li>스택 가능 — 스택마다 튕기는 횟수 +1 (최대 2스택 = 2회 튕김)</li>
-          <li>대안: "적"이 아니라 "벽(엄폐물)"에 맞고 튕기는 버전도 있음 — 엄폐물 시스템과 바로 엮이는 재미가 있지만 탄도 계산이 더 복잡함. 아래 열린 질문 참고</li>
+          <li>총알이 엄폐물에 맞아도 파괴되지 않고 반사각으로 튕겨 계속 날아간다(전통 놀이 "비석치기"에서 이름을 땀) — 튕긴 뒤에도 적에게 명중하면 그대로 데미지</li>
+          <li>스택 가능 — 스택마다 튕길 수 있는 최대 횟수 +1(최대 2스택 = 2회까지 튕김), 그 이상은 소멸</li>
+          <li>구현 메모: 현재 <code class="field">physics.add.collider(bullets, obstacles, ...)</code>가 무조건 <code class="field">bullet.destroy()</code>하는 부분을, 이 업그레이드 보유 여부에 따라 반사(속도 벡터를 충돌면 기준으로 반사)로 분기해야 함</li>
         </ul>
       </div>
     </div>
 
     <h3 style="margin-top:28px">스탯 강화계 상세</h3>
+    <p class="lede">전부 <strong>최대 5스택</strong>으로 상한 확정(런당 선택 기회가 3회뿐이라 사실상 초과할 일은 적지만, 안전장치로 둔다).</p>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>이름</th><th>효과(예시 수치, 밸런스 미정)</th><th class="mono">스택</th></tr></thead>
+        <thead><tr><th>이름</th><th>효과(예시 수치, 밸런스 미정)</th><th class="mono">스택 상한</th></tr></thead>
         <tbody>
-          <tr><td>데미지 강화</td><td>총알 데미지 +15%</td><td class="mono">무제한(가산)</td></tr>
-          <tr><td>공격속도 증가</td><td>발사 쿨다운 -12%</td><td class="mono">쿨다운 하한 60ms로 클램프</td></tr>
-          <tr><td>이동속도 증가</td><td>이동속도 +10%</td><td class="mono">무제한(가산)</td></tr>
-          <tr><td>탄창 확장</td><td>최대 탄약 +2</td><td class="mono">무제한(가산)</td></tr>
-          <tr><td>재장전 속도</td><td>재장전 시간 -15%</td><td class="mono">하한 400ms로 클램프</td></tr>
+          <tr><td>왕구슬 <span class="badge">데미지</span></td><td>총알 데미지 +15%</td><td class="mono">5스택</td></tr>
+          <tr><td>팽이채 연타 <span class="badge">공속</span></td><td>발사 쿨다운 -12%</td><td class="mono">5스택(쿨다운 하한 60ms 클램프)</td></tr>
+          <tr><td>잽싼 고무신 <span class="badge">이동속도</span></td><td>이동속도 +10%</td><td class="mono">5스택</td></tr>
+          <tr><td>문방구 사재기 <span class="badge">탄창</span></td><td>최대 탄약 +2</td><td class="mono">5스택</td></tr>
+          <tr><td>요요 손목 스냅 <span class="badge">재장전</span></td><td>재장전 시간 -15%</td><td class="mono">5스택(하한 400ms 클램프)</td></tr>
         </tbody>
       </table>
     </div>
 
-    <h3 style="margin-top:28px">속성탄계 상세</h3>
-    <p class="lede">기본안: <strong>장착형</strong> — 속성탄은 동시에 하나만 활성화되고, 새 속성탄을 고르면 이전 것을 교체한다(불+물을 동시에 스택하지 않음). 스택형 대안은 아래 열린 질문 참고.</p>
+    <h3 style="margin-top:28px">속성탄계 상세 <span class="badge done">확정</span></h3>
+    <p class="lede"><strong>스택형으로 확정</strong> — 폭죽탄·물풍선탄을 둘 다 들고 있으면 명중 시 화상+슬로우가 동시에 걸린다(서로 상쇄 없음, 각자 독립 적용). 같은 속성을 여러 번 고르면 그 속성 자체도 최대 3스택까지 중첩 — 스택마다 지속시간이 늘어난다(효과 강도 자체는 안 늘림, 무한 증식 방지).</p>
     <div class="grid">
       <div class="card">
-        <p class="name">🔥 불속성탄</p>
+        <p class="name">🔥 폭죽탄 <span class="badge">Fire</span></p>
         <ul>
-          <li>명중 시 대상에게 화상 부여 — 3초간 초당 데미지 4(총 12)</li>
-          <li>즉발 데미지는 그대로, 화상은 추가 지속딜 — 여러 발 맞히면 지속시간만 갱신(스택 안 함, 무한 증식 방지)</li>
+          <li>명중 시 대상에게 화상 부여 — 초당 데미지 4, 기본 지속 3초(스택마다 +1초, 최대 5초)</li>
+          <li>즉발 데미지는 그대로, 화상은 추가 지속딜 — 이미 화상 걸린 대상을 다시 맞히면 지속시간만 최댓값으로 갱신</li>
         </ul>
       </div>
       <div class="card">
-        <p class="name">💧 물속성탄</p>
+        <p class="name">💧 물풍선탄 <span class="badge">Water</span></p>
         <ul>
-          <li>명중 시 대상 이동속도 -40%, 2초 지속</li>
-          <li>여러 발 맞혀도 지속시간만 갱신 — 감속률은 갱신 안 함(마찬가지로 무한 증식 방지)</li>
+          <li>명중 시 대상 이동속도 -40%, 기본 지속 2초(스택마다 +0.5초, 최대 3.5초)</li>
+          <li>여러 발 맞혀도 지속시간만 갱신 — 감속률(-40%) 자체는 스택으로 안 늘림</li>
         </ul>
       </div>
       <div class="card">
         <p class="name">확장 후보(미확정)</p>
         <ul>
-          <li>⚡ 전기속성 — 명중 시 인접 적 1체에게 50% 데미지로 연쇄. 도탄과 메커니즘이 비슷해 상호배타 여부 검토 필요</li>
+          <li>⚡ 전기속성 — 명중 시 인접 적 1체에게 50% 데미지로 연쇄. 비석치기(도탄)와 메커니즘이 비슷해 상호배타 여부 검토 필요</li>
           <li>💨 바람속성 — 명중 시 적을 밀어냄(넉백). 엄폐물에 밀어붙이면 흥미로운 조합이 될 수 있음</li>
         </ul>
       </div>
@@ -511,15 +513,8 @@
     <p class="lede">일반·탱크·스피드·롤러형은 체력·접촉데미지 모두 <strong>×1.5</strong>. 엘리트는 이미 다른 몹보다 강하다는 점을 살려 <strong>×1.75</strong>로 별도 스케일 — 라운드 3의 "확실한 진짜 보스" 체감을 더 키운다. <strong>기본 방어력</strong>은 차등 없이 전체 공통 <code class="field">armor: 2</code>(엘리트 포함) — 총알 데미지에서 고정 경감(최소 1 데미지는 항상 보장). 스탯 강화계의 "데미지 강화" 업그레이드가 이 방어력을 무력화하는 손맛을 겸한다.</p>
 
     <div class="callout">
-      <p class="eyebrow">열린 질문 — 첨삭 포인트</p>
-      <p>구현 시작 전에 정해야 할 것들. 위 내용은 전부 기본안(default)일 뿐, 확정 아님.</p>
-      <ul>
-        <li><strong>속성탄: 장착형 vs 스택형</strong> — 장착형(하나만 활성, 단순하고 밸런스 잡기 쉬움) vs 스택형(불+물 동시 적용, 빌드 다양성은 높지만 상호작용 정의가 늘어남)</li>
-        <li><strong>도탄의 대상</strong> — 적 사이 튕김(구현 단순, 즉각적인 파워 체감) vs 벽(엄폐물) 튕김(엄폐물 시스템과 시너지, 탄도 계산 복잡)</li>
-        <li><strong>선택 UI 시각화</strong> — 3장 카드 나열(가장 흔한 패턴) 그대로 갈지, 이 프로젝트 특유의 "그 시절 문방구" 톤에 맞춰 다른 연출(예: 뽑기 캡슐 열기 연출)을 입힐지</li>
-        <li><strong>스탯 강화계 무제한 스택 상한</strong> — 데미지·이동속도처럼 "무제한(가산)"으로 적어둔 항목들, 실제로는 라운드 3개뿐이라 상한이 필요 없을 수도 있고, 향후 라운드 수가 늘어나면 상한을 둬야 할 수도 있음</li>
-        <li><strong>이름/번역</strong> — "멀티샷"·"더블샷"처럼 영어 음차를 그대로 쓸지, 다른 카테고리처럼 순우리말/그 시절 느낌 이름으로 바꿀지(예: 아이템 카탈로그는 전부 그 시절 장난감 이름)</li>
-      </ul>
+      <p class="eyebrow">설계 확정 요약</p>
+      <p>이 문서에서 다뤘던 모든 열린 질문이 첨삭을 거쳐 확정됐다 — 선택 횟수(3회), 몹 난이도(체력·접촉데미지 ×1.5, 엘리트 ×1.75, 방어력 2 공통), 속성탄 스택형, 도탄은 엄폐물 튕김, 선택 UI는 그 시절 테마 연출, 스탯 강화계 5스택 상한, 업그레이드 이름은 그 시절 느낌으로. 남은 미확정 항목은 전기·바람 속성(확장 후보, 구현 여부 자체가 미정)뿐이다. 다음 단계는 구현.</p>
     </div>
   </section>
 
