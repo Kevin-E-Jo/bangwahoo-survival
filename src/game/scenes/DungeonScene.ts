@@ -24,8 +24,13 @@ const PLAYER_MAX_HP = 100;
 const CONTACT_INVULN_MS = 500;
 
 const ELITE_SPEED = 55;
-const ELITE_HP = 70;
-const ELITE_CONTACT_DAMAGE = 25;
+const ELITE_HP = 123; // 70 × 1.75 — 다른 몹(×1.5)보다 별도로 더 세게, 마무리 보스 체감용
+const ELITE_CONTACT_DAMAGE = 44; // 25 × 1.75
+
+// 업그레이드 시스템 도입에 맞춰 전체 난이도 상향(블루프린트 「몹 난이도 상향」
+// 참고) — 방어력은 신규 스탯, 총알 데미지에서 고정 경감한다(최소 1 데미지는
+// 항상 보장, onBulletHitEnemy 참고).
+const BASE_ARMOR = 2;
 
 /** 엘리트를 제외한 일반 몹 유형별 스탯. 어떤 유형이 몇 마리 나오는지는
  * game-logic/runPlan.ts(시드 기반, 서버·클라 공유)가 정하고, 여기서는 유형별
@@ -34,11 +39,11 @@ const ARCHETYPE_STATS: Record<
   EnemyArchetype,
   { hp: number; speed: number; contactDamage: number; spriteBase: string }
 > = {
-  normal: { hp: 20, speed: 70, contactDamage: 12, spriteBase: "enemy" },
-  tank: { hp: 60, speed: 40, contactDamage: 16, spriteBase: "enemy-tank" },
-  speedster: { hp: 10, speed: 150, contactDamage: 10, spriteBase: "enemy-speed" },
+  normal: { hp: 30, speed: 70, contactDamage: 18, spriteBase: "enemy" },
+  tank: { hp: 90, speed: 40, contactDamage: 24, spriteBase: "enemy-tank" },
+  speedster: { hp: 15, speed: 150, contactDamage: 15, spriteBase: "enemy-speed" },
   // speed는 "구르기" 돌진 중에만 쓰인다 — 평소엔 방패를 든 채 정지.
-  roller: { hp: 30, speed: 260, contactDamage: 18, spriteBase: "enemy-roller" },
+  roller: { hp: 45, speed: 260, contactDamage: 27, spriteBase: "enemy-roller" },
 };
 
 const ROLLER_GUARD_MS = 900; // 방패를 든 채 정지해있는 시간
@@ -414,7 +419,9 @@ export class DungeonScene extends Phaser.Scene {
       return;
     }
 
-    const hp = (enemy.getData("hp") as number) - this.bulletDamage;
+    // 기본 방어력(전체 몹 공통) — 총알 데미지에서 고정 경감, 최소 1 데미지는 항상 보장.
+    const dmg = Math.max(1, this.bulletDamage - BASE_ARMOR);
+    const hp = (enemy.getData("hp") as number) - dmg;
     enemy.setData("hp", hp);
     if (hp <= 0) {
       this.killEnemy(enemy);
