@@ -104,6 +104,8 @@ docs/blueprint.html   팀 내부 설계 문서
 
 최신 항목이 위로 온다.
 
+- **2026-09-05** — [PR #6](https://github.com/Kevin-E-Jo/bangwahoo-survival/pull/6)
+  (몹 다양성) 머지.
 - **2026-09-05** — 엘리트 외 일반 몹 3종 추가: 느리고 체력 많은 탱크형, 빠르고
   약한 스피드형, 평소엔 방패(엄폐물)를 들고 정지해 총알을 막다가 일정 주기로만
   한 번씩 굴러 돌진하는 롤러형(구르는 동안만 피격 가능). 라운드별 등장 유형은
@@ -135,7 +137,6 @@ docs/blueprint.html   팀 내부 설계 문서
 
 ## 남은 작업 (로드맵)
 
-- [PR #6](https://github.com/Kevin-E-Jo/bangwahoo-survival/pull/6)(몹 다양성) 리뷰 및 머지
 - 실제 배포(Vercel) 및 스크린샷/플레이 영상 추가
 
 ---
