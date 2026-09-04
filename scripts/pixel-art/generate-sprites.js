@@ -182,6 +182,82 @@ function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, co
   writeDirect("enemy-elite", g);
 }
 
+// ── enemy-tank: 32x32, 느리지만 맷집 좋은 몹 — 등에 멘 책가방으로 덩치를
+// 표현한다(골격 자체는 같고 팔레트·소품만 다르게) ──────────────────────
+{
+  const palette = {
+    hair: hex("#4A3527"), hairShade: hex("#372716"),
+    skin: hex("#F5E1C8"), skinShade: hex("#E0C4A0"),
+    shirt: hex("#7A8450"), shirtShade: hex("#5C6438"), collar: hex("#E9E3C8"),
+    shorts: hex("#5C5240"), shortsShade: hex("#463C2E"),
+    shoe: hex("#463C2E"), ink: hex("#2B2A28"),
+  };
+  const bag = hex("#4E4230");
+  const bagShade = hex("#382F20");
+  const bagBuckle = hex("#C9A34A");
+  const drawBag = (g) => {
+    fillRect(g, 0, 12, 4, 24, bag);
+    fillRect(g, 0, 19, 4, 24, bagShade);
+    fillRect(g, 1, 14, 3, 15, bagBuckle);
+  };
+  const g = makeGrid(32, 32);
+  drawBag(g);
+  drawKid(g, { x: 6, y: 2, s: 1.05 }, palette);
+  writeDirect("enemy-tank", g);
+  const gw = makeGrid(32, 32);
+  drawBag(gw);
+  drawKid(gw, { x: 6, y: 2, s: 1.05 }, palette, true);
+  writeDirect("enemy-tank-walk", gw);
+}
+
+// ── enemy-speed: 24x24, 빠르지만 체력 적은 몹 — 뒤로 흐르는 잔상선으로
+// 속도감을 낸다 ──────────────────────────────────────────────────────
+{
+  const palette = {
+    hair: hex("#8A3B2E"), hairShade: hex("#6B2C21"),
+    skin: hex("#F5E1C8"), skinShade: hex("#E0C4A0"),
+    shirt: hex("#E6C740"), shirtShade: hex("#C4A62E"), collar: hex("#FBF3D0"),
+    shorts: hex("#3A3A3A"), shortsShade: hex("#282828"),
+    shoe: hex("#282828"), ink: hex("#2B2A28"),
+  };
+  const streak = hex("#F2E9C6");
+  const drawStreaks = (g) => {
+    fillRect(g, 0, 6, 2, 6, streak);
+    fillRect(g, 0, 11, 3, 11, streak);
+    fillRect(g, 0, 16, 2, 16, streak);
+  };
+  const g = makeGrid(24, 24);
+  drawStreaks(g);
+  drawKid(g, { x: 5, y: 1, s: 0.8 }, palette);
+  writeDirect("enemy-speed", g);
+  const gw = makeGrid(24, 24);
+  drawStreaks(gw);
+  drawKid(gw, { x: 5, y: 1, s: 0.8 }, palette, true);
+  writeDirect("enemy-speed-walk", gw);
+}
+
+// ── enemy-roller: 32x32, "엄폐물(쓰레기통 뚜껑)을 방패처럼 들고 있다가
+// 구르기로만 돌진하는" 몹. 걷기 프레임은 없다 — 평소엔 방패를 든 채 정지,
+// 굴러갈 때만 스프라이트를 런타임에 회전시켜 표현한다(DungeonScene 담당) ──
+{
+  const palette = {
+    hair: hex("#5C5240"), hairShade: hex("#463C2E"),
+    skin: hex("#F5E1C8"), skinShade: hex("#E0C4A0"),
+    shirt: hex("#8C9AA6"), shirtShade: hex("#6C7A86"), collar: hex("#E3E9EC"),
+    shorts: hex("#5C6470"), shortsShade: hex("#454C56"),
+    shoe: hex("#454C56"), ink: hex("#2B2A28"),
+  };
+  const g = makeGrid(32, 32);
+  drawKid(g, { x: 6, y: 3, s: 1 }, palette);
+  // 방패(쓰레기통 뚜껑) — 몸통 앞을 가리는 원형 실루엣 + 손잡이
+  const lid = hex("#B8BEC2");
+  const lidShade = hex("#8E9598");
+  const lidRim = hex("#D6DADC");
+  fillEllipse(g, 15, 20, 9, 10, (x, y, dx, dy) => (dx * dx + dy * dy > 0.72 ? lidRim : dy > 0.3 ? lidShade : lid));
+  fillEllipse(g, 15, 18, 2, 2, () => hex("#6C7478")); // 손잡이(중심 돌기)
+  writeDirect("enemy-roller", g);
+}
+
 // ── 엄폐물(24x24, direct) — 골목/놀이터 소품, 이동·총알 둘 다 막는다 ─────
 
 // 박스 — 접힌 자국이 있는 종이상자

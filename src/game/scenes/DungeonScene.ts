@@ -1,5 +1,11 @@
 import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석 참고
-import { generateRunPlan, computeRunRewards, ROUND_COUNT, type RoundPlan } from "@/lib/game-logic";
+import {
+  generateRunPlan,
+  computeRunRewards,
+  ROUND_COUNT,
+  type RoundPlan,
+  type EnemyArchetype,
+} from "@/lib/game-logic";
 import { EventBus } from "../EventBus";
 import { CombatEvents, type RunEndedPayload } from "../events";
 import { pickMapLayout, type ObstacleType } from "../maps";
@@ -15,13 +21,29 @@ export const CANVAS_H = 540;
 
 const PLAYER_SPEED = 220;
 const PLAYER_MAX_HP = 100;
-const CONTACT_DAMAGE = { combat: 12, elite: 25 } as const;
 const CONTACT_INVULN_MS = 500;
 
-const ENEMY_SPEED = 70;
-const ENEMY_HP = 20;
 const ELITE_SPEED = 55;
 const ELITE_HP = 70;
+const ELITE_CONTACT_DAMAGE = 25;
+
+/** 엘리트를 제외한 일반 몹 유형별 스탯. 어떤 유형이 몇 마리 나오는지는
+ * game-logic/runPlan.ts(시드 기반, 서버·클라 공유)가 정하고, 여기서는 유형별
+ * 수치·스프라이트만 관리한다. */
+const ARCHETYPE_STATS: Record<
+  EnemyArchetype,
+  { hp: number; speed: number; contactDamage: number; spriteBase: string }
+> = {
+  normal: { hp: 20, speed: 70, contactDamage: 12, spriteBase: "enemy" },
+  tank: { hp: 60, speed: 40, contactDamage: 16, spriteBase: "enemy-tank" },
+  speedster: { hp: 10, speed: 150, contactDamage: 10, spriteBase: "enemy-speed" },
+  // speed는 "구르기" 돌진 중에만 쓰인다 — 평소엔 방패를 든 채 정지.
+  roller: { hp: 30, speed: 260, contactDamage: 18, spriteBase: "enemy-roller" },
+};
+
+const ROLLER_GUARD_MS = 900; // 방패를 든 채 정지해있는 시간
+const ROLLER_ROLL_MS = 500; // 한 번 구를 때 지속 시간
+const ROLLER_SPIN_DEG_PER_MS = 0.9; // 구르는 동안 스프라이트 회전 속도(시각 효과)
 
 const BULLET_SPEED = 560;
 const FIRE_COOLDOWN_MS = 180;
@@ -292,12 +314,55 @@ export class DungeonScene extends Phaser.Scene {
     for (const enemyObj of this.enemies.getChildren()) {
       const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
       if (!enemy.active || enemy.getData("dying")) continue;
-      const isElite = enemy.getData("isElite") as boolean;
-      const speed = isElite ? ELITE_SPEED : ENEMY_SPEED;
-      const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
-      enemy.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
-      enemy.setFlipX(Math.cos(angle) < 0);
-      this.updateWalkFrame(enemy, true, time);
+
+      if (enemy.getData("isElite") as boolean) {
+        this.homeTowardPlayer(enemy, ELITE_SPEED, time);
+        continue;
+      }
+      const archetype = enemy.getData("archetype") as EnemyArchetype;
+      if (archetype === "roller") {
+        this.updateRoller(enemy, time);
+        continue;
+      }
+      this.homeTowardPlayer(enemy, ARCHETYPE_STATS[archetype].speed, time);
+    }
+  }
+
+  private homeTowardPlayer(enemy: Phaser.Physics.Arcade.Sprite, speed: number, time: number) {
+    const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+    enemy.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+    enemy.setFlipX(Math.cos(angle) < 0);
+    this.updateWalkFrame(enemy, true, time);
+  }
+
+  /** 롤러형 몹의 움직임: 평소엔 방패(엄폐물)를 든 채 완전히 정지(총알 무효)해
+   * 있다가, 일정 시간마다 그 순간 플레이어 방향으로 한 번 굴러 돌진한다.
+   * 구르는 동안은 방향을 다시 좇지 않는다(구르기로만, 즉 이산적으로만
+   * 이동) — 그래서 플레이어가 타이밍을 보고 굴러오는 궤적을 피할 수 있다. */
+  private updateRoller(enemy: Phaser.Physics.Arcade.Sprite, time: number) {
+    const state = (enemy.getData("rollState") as "guard" | "rolling" | undefined) ?? "guard";
+    const stateAt = (enemy.getData("rollStateAt") as number | undefined) ?? time;
+
+    if (state === "guard") {
+      enemy.setVelocity(0, 0);
+      enemy.setAngle(0);
+      enemy.setFlipX(this.player.x < enemy.x);
+      if (time - stateAt >= ROLLER_GUARD_MS) {
+        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+        enemy.setData("rollState", "rolling");
+        enemy.setData("rollStateAt", time);
+        const rollSpeed = ARCHETYPE_STATS.roller.speed;
+        enemy.setVelocity(Math.cos(angle) * rollSpeed, Math.sin(angle) * rollSpeed);
+      }
+      return;
+    }
+
+    enemy.setAngle((time - stateAt) * ROLLER_SPIN_DEG_PER_MS);
+    if (time - stateAt >= ROLLER_ROLL_MS) {
+      enemy.setData("rollState", "guard");
+      enemy.setData("rollStateAt", time);
+      enemy.setVelocity(0, 0);
+      enemy.setAngle(0);
     }
   }
 
@@ -342,6 +407,13 @@ export class DungeonScene extends Phaser.Scene {
     if (!bullet.active || !enemy.active || enemy.getData("dying")) return;
     bullet.destroy();
 
+    // 롤러형은 구르는 중이 아니면 방패를 들고 있어 총알이 데미지 없이 막힌다.
+    const archetype = enemy.getData("archetype") as EnemyArchetype | undefined;
+    if (archetype === "roller" && enemy.getData("rollState") !== "rolling") {
+      this.flashHit(enemy, 0xffe066); // 노란 틴트로 "막혔다"를 흰색 피격과 구분
+      return;
+    }
+
     const hp = (enemy.getData("hp") as number) - this.bulletDamage;
     enemy.setData("hp", hp);
     if (hp <= 0) {
@@ -357,8 +429,8 @@ export class DungeonScene extends Phaser.Scene {
     if (now - this.lastHitAt < CONTACT_INVULN_MS) return;
     this.lastHitAt = now;
 
-    const isElite = enemy.getData("isElite") as boolean;
-    this.hp = Math.max(0, this.hp - CONTACT_DAMAGE[isElite ? "elite" : "combat"]);
+    const contactDamage = enemy.getData("contactDamage") as number;
+    this.hp = Math.max(0, this.hp - contactDamage);
     EventBus.emit(CombatEvents.HpChanged, { current: this.hp, max: PLAYER_MAX_HP });
     this.flashHit(this.player);
     this.killEnemy(enemy);
@@ -369,9 +441,10 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
-  /** 흰색으로 짧게 물들였다 원래대로 — 총알/접촉 피격 둘 다 재사용. */
-  private flashHit(sprite: Phaser.Physics.Arcade.Sprite) {
-    sprite.setTintFill(0xffffff);
+  /** 짧게 틴트 플래시 후 원래대로 — 총알/접촉 피격 둘 다 재사용. 기본은
+   * 흰색(피격), 롤러형의 방패 차단은 노란색으로 구분해서 보여준다. */
+  private flashHit(sprite: Phaser.Physics.Arcade.Sprite, tint = 0xffffff) {
+    sprite.setTintFill(tint);
     this.time.delayedCall(HIT_TINT_MS, () => sprite.clearTint());
   }
 
@@ -412,26 +485,33 @@ export class DungeonScene extends Phaser.Scene {
     EventBus.emit(CombatEvents.WaveStarted, { waveIndex: index, totalWaves: ROUND_COUNT });
 
     const plan = this.rounds[index];
-    const spawnIsElite: boolean[] = [
-      ...Array<boolean>(plan.enemyCount).fill(false),
-      ...Array<boolean>(plan.eliteCount).fill(true),
+    const spawns: Array<{ isElite: boolean; archetype?: EnemyArchetype }> = [
+      ...plan.archetypes.map((archetype) => ({ isElite: false, archetype })),
+      ...Array.from({ length: plan.eliteCount }, () => ({ isElite: true })),
     ];
-    spawnIsElite.forEach((isElite, i) => {
+    spawns.forEach((spawn, i) => {
       this.time.delayedCall(i * SPAWN_STAGGER_MS, () => {
         if (this.ended) return;
         const { x, y } = this.randomEdgePoint();
-        const enemy = this.enemies.create(
-          x,
-          y,
-          isElite ? "enemy-elite" : "enemy",
-        ) as Phaser.Physics.Arcade.Sprite;
-        enemy.setData("hp", isElite ? ELITE_HP : ENEMY_HP);
-        enemy.setData("isElite", isElite);
-        enemy.setData("baseKey", isElite ? "enemy-elite" : "enemy");
+        const stats = spawn.archetype ? ARCHETYPE_STATS[spawn.archetype] : undefined;
+        const textureKey = spawn.isElite ? "enemy-elite" : stats!.spriteBase;
+
+        const enemy = this.enemies.create(x, y, textureKey) as Phaser.Physics.Arcade.Sprite;
+        enemy.setData("hp", spawn.isElite ? ELITE_HP : stats!.hp);
+        enemy.setData("isElite", spawn.isElite);
+        enemy.setData("baseKey", textureKey);
+        enemy.setData("contactDamage", spawn.isElite ? ELITE_CONTACT_DAMAGE : stats!.contactDamage);
+        if (spawn.archetype) {
+          enemy.setData("archetype", spawn.archetype);
+          if (spawn.archetype === "roller") {
+            enemy.setData("rollState", "guard");
+            enemy.setData("rollStateAt", this.time.now);
+          }
+        }
       });
     });
     // 마지막 스폰 이후에도 그룹이 즉시 비어있지 않도록, 스폰 완료 시점에 한 번 더 체크.
-    this.time.delayedCall(spawnIsElite.length * SPAWN_STAGGER_MS + 50, () => this.checkWaveClear());
+    this.time.delayedCall(spawns.length * SPAWN_STAGGER_MS + 50, () => this.checkWaveClear());
   }
 
   /** 화면 가장자리 바로 밖 임의의 지점 — 사방에서 플레이어를 향해 등장한다. */
