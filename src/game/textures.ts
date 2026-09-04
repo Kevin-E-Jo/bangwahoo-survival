@@ -18,6 +18,12 @@ const PALETTE = {
   pickupOutline: 0xb3852a,
   obstacle: 0xc89b6a,
   obstacleOutline: 0x8a7355,
+  tankBody: 0x7a8450,
+  tankOutline: 0x5c6438,
+  speedBody: 0xe6c740,
+  speedOutline: 0xc4a62e,
+  rollerBody: 0xb8bec2,
+  rollerOutline: 0x8e9598,
 };
 
 function ensure(scene: Phaser.Scene, key: string, draw: (g: Phaser.GameObjects.Graphics) => void, size: number) {
@@ -115,4 +121,40 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
       24,
     );
   }
+
+  ensure(
+    scene,
+    "enemy-tank",
+    (g) => {
+      g.fillStyle(PALETTE.tankBody, 1);
+      g.fillCircle(16, 16, 15);
+      g.lineStyle(3, PALETTE.tankOutline, 1);
+      g.strokeCircle(16, 16, 15);
+    },
+    32,
+  );
+
+  ensure(
+    scene,
+    "enemy-speed",
+    (g) => {
+      g.fillStyle(PALETTE.speedBody, 1);
+      g.fillCircle(12, 12, 11);
+      g.lineStyle(2, PALETTE.speedOutline, 1);
+      g.strokeCircle(12, 12, 11);
+    },
+    24,
+  );
+
+  ensure(
+    scene,
+    "enemy-roller",
+    (g) => {
+      g.fillStyle(PALETTE.rollerBody, 1);
+      g.fillCircle(16, 16, 15);
+      g.lineStyle(3, PALETTE.rollerOutline, 1);
+      g.strokeCircle(16, 16, 15);
+    },
+    32,
+  );
 }
