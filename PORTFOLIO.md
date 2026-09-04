@@ -104,6 +104,13 @@ docs/blueprint.html   팀 내부 설계 문서
 
 최신 항목이 위로 온다.
 
+- **2026-09-05** — [METHODOLOGY.md](./docs/METHODOLOGY.md)에 원칙 12·13 추가.
+  업그레이드 시스템을 `feature/combat-upgrades-core`/`feature/combat-elements`
+  두 하위 worktree로 나눠 병렬 작업하며 실제로 쓰인 "함수 시그니처를 얼려
+  플레이스홀더로 남겨두고 나중에 통째로 교체" 패턴(`statusEffects.ts`)을
+  formalize. 더불어 다른 세션이 세운 것과 같은 분리 계획을 뒤늦게 발견해
+  중복 커밋 2개를 되돌린 사고를 교훈으로 남김 — 하위 worktree를 새로 만들기
+  직전엔 `git worktree list`를 다시 확인할 것.
 - **2026-09-05** — 업그레이드 시스템 구현 착수. 몹 난이도 상향(체력/접촉데미지
   ×1.5, 엘리트 ×1.75, 방어력 2 공통)을 먼저 반영해
   [PR #7](https://github.com/Kevin-E-Jo/bangwahoo-survival/pull/7)로 오픈.
