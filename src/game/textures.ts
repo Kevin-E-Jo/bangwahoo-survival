@@ -16,6 +16,8 @@ const PALETTE = {
   ground: 0xdccfa6,
   pickup: 0xf5e9ce,
   pickupOutline: 0xb3852a,
+  obstacle: 0xc89b6a,
+  obstacleOutline: 0x8a7355,
 };
 
 function ensure(scene: Phaser.Scene, key: string, draw: (g: Phaser.GameObjects.Graphics) => void, size: number) {
@@ -99,4 +101,18 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
     },
     20,
   );
+
+  for (const key of ["obstacle_box", "obstacle_planter", "obstacle_bench"]) {
+    ensure(
+      scene,
+      key,
+      (g) => {
+        g.fillStyle(PALETTE.obstacle, 1);
+        g.fillRoundedRect(1, 1, 22, 22, 3);
+        g.lineStyle(2, PALETTE.obstacleOutline, 1);
+        g.strokeRoundedRect(1, 1, 22, 22, 3);
+      },
+      24,
+    );
+  }
 }

@@ -70,7 +70,7 @@ function writeDirect(name, grid) {
 // 몸통 실루엣(측면, 오른쪽을 보고 서 있는 자세) — 머리/앞머리/몸통/소매/
 // 반바지/다리/신발을 개별 사각형으로 쌓아 사람 형태를 낸다. 각 캐릭터는
 // 같은 골격에 색·비율만 바꿔서 통일감을 준다.
-function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, collar, shorts, shortsShade, shoe, ink }) {
+function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, collar, shorts, shortsShade, shoe, ink }, walking = false) {
   const { x, y, s } = o; // 좌상단 기준, s = 스케일(1이면 1px 단위)
   const R = (dx0, dy0, dx1, dy1, c) =>
     fillRect(
@@ -106,38 +106,47 @@ function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, co
   // 반바지
   R(1, 19, 9, 22, shorts);
   R(1, 21, 9, 22, shortsShade);
-  // 다리
-  R(2, 23, 4, 25, skin);
-  R(6, 23, 8, 25, skin);
+  // 다리 — walking이면 한쪽은 올리고 한쪽은 내려서 보행감을 낸다(2프레임 걷기)
+  const lift = walking ? 1 : 0;
+  R(2, 23 - lift, 4, 25 - lift, skin);
+  R(6, 23 + lift, 8, 25 + lift, skin);
   // 신발
-  R(1, 26, 4, 27, shoe);
-  R(6, 26, 9, 27, shoe);
+  R(1, 26 - lift, 4, 27 - lift, shoe);
+  R(6, 26 + lift, 9, 27 + lift, shoe);
 }
 
 // ── player: 32x32, 그 시절 골목 아이 캐릭터(민트) ──────────────────────
 {
-  const g = makeGrid(32, 32);
-  drawKid(g, { x: 6, y: 3, s: 1 }, {
+  const palette = {
     hair: hex("#6B4A3A"), hairShade: hex("#523628"),
     skin: hex("#F5E1C8"), skinShade: hex("#E0C4A0"),
     shirt: hex("#4FA98F"), shirtShade: hex("#357A66"), collar: hex("#DCEFE9"),
     shorts: hex("#E8DCB8"), shortsShade: hex("#C8B98A"),
     shoe: hex("#357A66"), ink: hex("#2B2A28"),
-  });
+  };
+  const g = makeGrid(32, 32);
+  drawKid(g, { x: 6, y: 3, s: 1 }, palette);
   writeDirect("player", g);
+  const gw = makeGrid(32, 32);
+  drawKid(gw, { x: 6, y: 3, s: 1 }, palette, true);
+  writeDirect("player-walk", gw);
 }
 
 // ── enemy: 28x28, 골목 상대편 아이(코랄) — 몬스터가 아니라 또래 아이 ────
 {
-  const g = makeGrid(28, 28);
-  drawKid(g, { x: 4, y: 1, s: 1 }, {
+  const palette = {
     hair: hex("#7A4B34"), hairShade: hex("#5C3826"),
     skin: hex("#F5E1C8"), skinShade: hex("#E0C4A0"),
     shirt: hex("#E98A66"), shirtShade: hex("#C4694A"), collar: hex("#FBE3DA"),
     shorts: hex("#EFDCC8"), shortsShade: hex("#D6C2A6"),
     shoe: hex("#C4694A"), ink: hex("#2B2A28"),
-  });
+  };
+  const g = makeGrid(28, 28);
+  drawKid(g, { x: 4, y: 1, s: 1 }, palette);
   writeDirect("enemy", g);
+  const gw = makeGrid(28, 28);
+  drawKid(gw, { x: 4, y: 1, s: 1 }, palette, true);
+  writeDirect("enemy-walk", gw);
 }
 
 // ── enemy-elite: 40x40, "수학익힘책을 방패처럼 든 6학년 보스" ──────────
@@ -171,6 +180,55 @@ function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, co
   fillRect(g, 15, 12, 16, 13, hex("#2B2A28"));
   fillRect(g, 23, 12, 24, 13, hex("#2B2A28"));
   writeDirect("enemy-elite", g);
+}
+
+// ── 엄폐물(24x24, direct) — 골목/놀이터 소품, 이동·총알 둘 다 막는다 ─────
+
+// 박스 — 접힌 자국이 있는 종이상자
+{
+  const g = makeGrid(24, 24);
+  const box = hex("#D6C2A6");
+  const boxShade = hex("#B39A78");
+  const fold = hex("#8A7355");
+  fillRect(g, 2, 4, 21, 21, box);
+  fillRect(g, 2, 14, 21, 21, boxShade);
+  fillRect(g, 2, 4, 21, 5, fold); // 위 테이프 자국
+  fillRect(g, 10, 4, 13, 21, fold); // 세로 접힌 선
+  writeDirect("obstacle_box", g);
+}
+
+// 화분 — 테라코타 화분 + 초록 잎
+{
+  const g = makeGrid(24, 24);
+  const pot = hex("#D68A5C");
+  const potShade = hex("#B06A3E");
+  const rim = hex("#E8AE82");
+  const leaf = hex("#5DAE7A");
+  const leafShade = hex("#3F8A5C");
+  for (let y = 10; y <= 21; y++) {
+    const inset = Math.round(((y - 10) / 11) * 3);
+    fillRect(g, 3 + inset, y, 20 - inset, y, y >= 17 ? potShade : pot);
+  }
+  fillRect(g, 2, 9, 21, 11, rim);
+  [[7, 8], [12, 5], [17, 8]].forEach(([lx, ly], i) => {
+    fillEllipse(g, lx, ly, 4, 5, () => (i === 1 ? leaf : leafShade));
+  });
+  writeDirect("obstacle_planter", g);
+}
+
+// 벤치 — 나무 판자 + 다리
+{
+  const g = makeGrid(24, 24);
+  const wood = hex("#C89B6A");
+  const woodShade = hex("#A67C4E");
+  const leg = hex("#6B4A3A");
+  fillRect(g, 1, 6, 22, 10, wood);
+  fillRect(g, 1, 9, 22, 10, woodShade);
+  fillRect(g, 1, 13, 22, 16, wood);
+  fillRect(g, 1, 15, 22, 16, woodShade);
+  fillRect(g, 2, 17, 4, 21, leg);
+  fillRect(g, 19, 17, 21, 21, leg);
+  writeDirect("obstacle_bench", g);
 }
 
 // ── bullet: 4x4 → 8x8, BB탄 ────────────────────────────────────────
