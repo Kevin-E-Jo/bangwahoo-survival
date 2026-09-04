@@ -2,6 +2,7 @@ import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석
 import { BootScene } from "./scenes/BootScene";
 import { DungeonScene, CANVAS_W, CANVAS_H } from "./scenes/DungeonScene";
 import { UIScene } from "./scenes/UIScene";
+import { UpgradeChoiceScene } from "./scenes/UpgradeChoiceScene";
 import { ResultScene } from "./scenes/ResultScene";
 
 /** 고정 해상도 캔버스 + 레터박스(블루프린트 「게임플레이 › 전투」)로 BootScene부터
@@ -29,6 +30,6 @@ function buildConfig(parent: HTMLElement): Phaser.Types.Core.GameConfig {
         debug: false,
       },
     },
-    scene: [BootScene, DungeonScene, UIScene, ResultScene],
+    scene: [BootScene, DungeonScene, UIScene, UpgradeChoiceScene, ResultScene],
   };
 }
