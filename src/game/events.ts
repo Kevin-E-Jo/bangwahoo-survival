@@ -1,6 +1,8 @@
 // DungeonScene ↔ UIScene ↔ ResultScene이 주고받는 combat:* 이벤트 계약.
 // 블루프린트 「씬 간 인터페이스 › Phaser 내부 이벤트」와 반드시 동일하게 유지한다.
 
+import type { UpgradeId } from "@/lib/game-logic/upgradeTypes";
+
 export interface HpChangedPayload {
   current: number;
   max: number;
@@ -29,10 +31,16 @@ export interface RunEndedPayload {
   seed: string;
 }
 
+/** UpgradeChoiceScene → DungeonScene. 캡슐 하나를 골라 열었을 때 발행. */
+export interface UpgradeChosenPayload {
+  upgradeId: UpgradeId;
+}
+
 export const CombatEvents = {
   HpChanged: "combat:hp-changed",
   AmmoChanged: "combat:ammo-changed",
   WaveStarted: "combat:wave-started",
   WaveCleared: "combat:wave-cleared",
   RunEnded: "combat:run-ended",
+  UpgradeChosen: "combat:upgrade-chosen",
 } as const;

@@ -2,13 +2,17 @@ import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석
 import {
   generateRunPlan,
   computeRunRewards,
+  pickUpgradeChoices,
   ROUND_COUNT,
   type RoundPlan,
   type EnemyArchetype,
+  type UpgradeId,
 } from "@/lib/game-logic";
+import type { ElementKey } from "@/lib/game-logic/upgradeTypes";
 import { EventBus } from "../EventBus";
-import { CombatEvents, type RunEndedPayload } from "../events";
+import { CombatEvents, type RunEndedPayload, type UpgradeChosenPayload } from "../events";
 import { pickMapLayout, type ObstacleType } from "../maps";
+import { applyElementalOnHit, tickStatusEffects } from "../statusEffects";
 
 const OBSTACLE_TEXTURE: Record<ObstacleType, string> = {
   box: "obstacle_box",
@@ -57,6 +61,18 @@ const AUTO_TARGET_RANGE = 420; // 이 거리 안의 적만 자동 조준·발사
 const SPAWN_STAGGER_MS = 550;
 const SPAWN_MARGIN = 24; // 화면 가장자리 바로 밖에서 스폰
 
+// 업그레이드 시스템(블루프린트 「업그레이드 시스템」) — 런 한정 빌드 강화.
+// 스택당 배율/가산치는 문서에 확정된 수치를 그대로 옮긴 것.
+const MULTISHOT_SPREAD_DEG = 15;
+const DOUBLESHOT_DELAY_MS = 80;
+const DAMAGE_PCT_PER_STACK = 0.15;
+const FIRERATE_MULT_PER_STACK = 0.88; // -12%/스택
+const FIRERATE_FLOOR_MS = 60;
+const MOVESPEED_PCT_PER_STACK = 0.1;
+const AMMO_PER_STACK = 2;
+const RELOAD_MULT_PER_STACK = 0.85; // -15%/스택
+const RELOAD_FLOOR_MS = 400;
+
 const WALK_TOGGLE_MS = 150; // 이동 중 idle↔walk 프레임 전환 주기
 const HIT_TINT_MS = 90; // 피격 시 흰색 플래시 지속 시간
 const DEATH_TWEEN_MS = 220; // 사망 시 축소·페이드 연출 길이
@@ -93,12 +109,19 @@ export class DungeonScene extends Phaser.Scene {
   private obstacles!: Phaser.Physics.Arcade.StaticGroup;
 
   private hp = PLAYER_MAX_HP;
+  // ammoMaxBase는 마을 상점(town shop) 영구 업그레이드까지만 반영한 값이고,
+  // ammoMax는 여기에 런 한정 "문방구 사재기" 스택을 더한 실제 사용값이다.
+  private ammoMaxBase = 6;
   private ammoMax = 6;
   private ammo = 6;
   private reloading = false;
   private lastFiredAt = 0;
   private lastHitAt = -Infinity;
   private bulletDamage = 10;
+
+  // 런 한정 업그레이드 보유 현황(블루프린트 「업그레이드 시스템」) — 마을 상점의
+  // weaponDamage/weaponAmmo(영구)와는 완전히 별개이고, 런이 끝나면 사라진다.
+  private appliedUpgrades = new Map<UpgradeId, number>();
 
   private roundBusy = false; // 현재 라운드 스폰/진행 중 — 중복 진행 방지
   private cumulativeCurrency = 0;
@@ -115,9 +138,11 @@ export class DungeonScene extends Phaser.Scene {
     this.roundIndex = 0;
     this.ended = false;
     this.hp = PLAYER_MAX_HP;
-    this.ammoMax = 6 + data.upgrades.weaponAmmo * 2;
+    this.ammoMaxBase = 6 + data.upgrades.weaponAmmo * 2;
+    this.ammoMax = this.ammoMaxBase;
     this.ammo = this.ammoMax;
     this.bulletDamage = 10 + data.upgrades.weaponDamage * 4;
+    this.appliedUpgrades = new Map();
     this.cumulativeCurrency = 0;
     this.cumulativeItems = new Map();
   }
@@ -152,8 +177,11 @@ export class DungeonScene extends Phaser.Scene {
     // 끊어 추격을 따돌리거나, 자기 총알도 막힌다는 트레이드오프를 진다).
     this.physics.add.collider(this.player, this.obstacles);
     this.physics.add.collider(this.enemies, this.obstacles);
-    this.physics.add.collider(this.bullets, this.obstacles, (bulletObj) => {
-      (bulletObj as Phaser.Physics.Arcade.Image).destroy();
+    this.physics.add.collider(this.bullets, this.obstacles, (bulletObj, obstacleObj) => {
+      this.onBulletHitObstacle(
+        bulletObj as Phaser.Physics.Arcade.Image,
+        obstacleObj as Phaser.Physics.Arcade.Image,
+      );
     });
 
     this.physics.add.overlap(this.bullets, this.enemies, (bulletObj, enemyObj) => {
@@ -183,7 +211,8 @@ export class DungeonScene extends Phaser.Scene {
       ammoMax: this.ammoMax,
     });
 
-    this.startRound(0);
+    // 런 시작 직후, 첫 라운드 스폰 전에 첫 업그레이드 선택(pickIndex 0)을 끼워 넣는다.
+    this.showUpgradeChoice(0, () => this.startRound(0));
   }
 
   update(time: number) {
@@ -193,8 +222,80 @@ export class DungeonScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.startReload();
     this.updateAutoAim(time);
     this.updateEnemyHoming();
+
+    // NOTE(merge): 속성탄 상태이상 틱 처리. 병렬 브랜치가 statusEffects.ts를
+    // 실제 구현으로 교체할 때 이 한 줄과 import만 바뀌면 된다 — 위아래 줄은
+    // 건드릴 필요 없음.
+    tickStatusEffects({ player: this.player, enemies: this.enemies, time });
+
     this.cleanupOffscreenBullets();
     this.cleanupEscapedEnemies();
+  }
+
+  // ── 업그레이드 선택(런당 3회: 시작 직후 / 1라운드 클리어 후 / 2라운드 클리어 후) ──
+
+  private stacksOf(id: UpgradeId): number {
+    return this.appliedUpgrades.get(id) ?? 0;
+  }
+
+  /** DungeonScene을 pause()하고 UpgradeChoiceScene을 병렬 launch, 선택 완료
+   * 이벤트를 받으면 스택을 갱신하고 resume() 후 onDone을 호출한다. 후보가
+   * 하나도 없으면(이론상 거의 불가능하지만 안전장치) 그냥 넘어간다. */
+  private showUpgradeChoice(pickIndex: number, onDone: () => void) {
+    const choices = pickUpgradeChoices(this.seed, pickIndex, this.appliedUpgrades);
+    if (choices.length === 0) {
+      onDone();
+      return;
+    }
+
+    this.scene.pause();
+    this.scene.launch("UpgradeChoiceScene", { choices });
+
+    const onChosen = (payload: UpgradeChosenPayload) => {
+      this.applyUpgrade(payload.upgradeId);
+      this.scene.resume();
+      onDone();
+    };
+    EventBus.once(CombatEvents.UpgradeChosen, onChosen);
+  }
+
+  private applyUpgrade(id: UpgradeId) {
+    const stacks = this.stacksOf(id) + 1;
+    this.appliedUpgrades.set(id, stacks);
+
+    // 탄창 용량은 즉시 반영해야(+2) 다음 발사부터 바로 체감되고, 이미 장전된
+    // 탄약도 같이 늘어나야 자연스럽다(재장전을 기다릴 필요 없음).
+    if (id === "ammo") {
+      const newMax = this.ammoMaxBase + AMMO_PER_STACK * stacks;
+      const delta = newMax - this.ammoMax;
+      this.ammoMax = newMax;
+      this.ammo = Math.min(this.ammoMax, this.ammo + delta);
+      EventBus.emit(CombatEvents.AmmoChanged, { current: this.ammo, max: this.ammoMax });
+    }
+  }
+
+  // ── 스탯 강화계 실효치(마을 영구 업그레이드 위에 런 한정 스택을 곱/가산) ──
+
+  private effectiveBulletDamage(): number {
+    return this.bulletDamage * (1 + DAMAGE_PCT_PER_STACK * this.stacksOf("damage"));
+  }
+
+  private effectiveFireCooldownMs(): number {
+    return Math.max(
+      FIRERATE_FLOOR_MS,
+      FIRE_COOLDOWN_MS * Math.pow(FIRERATE_MULT_PER_STACK, this.stacksOf("firerate")),
+    );
+  }
+
+  private effectivePlayerSpeed(): number {
+    return PLAYER_SPEED * (1 + MOVESPEED_PCT_PER_STACK * this.stacksOf("movespeed"));
+  }
+
+  private effectiveReloadMs(): number {
+    return Math.max(
+      RELOAD_FLOOR_MS,
+      RELOAD_MS * Math.pow(RELOAD_MULT_PER_STACK, this.stacksOf("reload")),
+    );
   }
 
   // ── 이동(WASD) ───────────────────────────────────────────────
@@ -211,7 +312,8 @@ export class DungeonScene extends Phaser.Scene {
       vx *= Math.SQRT1_2;
       vy *= Math.SQRT1_2;
     }
-    this.player.setVelocity(vx * PLAYER_SPEED, vy * PLAYER_SPEED);
+    const speed = this.effectivePlayerSpeed();
+    this.player.setVelocity(vx * speed, vy * speed);
     if (vx < 0) this.player.setFlipX(true);
     else if (vx > 0) this.player.setFlipX(false);
 
@@ -273,21 +375,54 @@ export class DungeonScene extends Phaser.Scene {
       if (this.ammo <= 0 && !this.reloading) this.startReload();
       return;
     }
-    if (time - this.lastFiredAt < FIRE_COOLDOWN_MS) return;
+    if (time - this.lastFiredAt < this.effectiveFireCooldownMs()) return;
     this.lastFiredAt = time;
 
-    const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
-    const bullet = this.bullets.create(
-      this.player.x,
-      this.player.y,
-      "bullet",
-    ) as Phaser.Physics.Arcade.Image;
-    this.physics.velocityFromRotation(angle, BULLET_SPEED, bullet.body!.velocity);
-    this.showMuzzleFlash(angle);
+    const baseAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
+    const angles = this.computeFiringAngles(baseAngle);
+    const originX = this.player.x;
+    const originY = this.player.y;
+    this.fireBulletSet(angles, originX, originY);
+    this.showMuzzleFlash(baseAngle);
+
+    // 쌍딱총(doubleshot) — 확산 없이 같은 각도 배열을 그대로, 같은 발사 지점
+    // (originX/Y)에서 약 80ms 뒤 한 번 더 쏜다. 그 사이 플레이어가 움직여도
+    // "그 순간 쐈던 것과 완전히 겹치는 한 발"이라는 의미가 유지되도록 재조준하지 않는다.
+    if (this.stacksOf("doubleshot") > 0) {
+      this.time.delayedCall(DOUBLESHOT_DELAY_MS, () => {
+        if (this.ended) return;
+        this.fireBulletSet(angles, originX, originY);
+      });
+    }
 
     this.ammo -= 1;
     EventBus.emit(CombatEvents.AmmoChanged, { current: this.ammo, max: this.ammoMax });
     if (this.ammo <= 0) this.startReload();
+  }
+
+  /** 고무줄 연사(multishot) 스택 수만큼 각도 배열을 만든다 — 기본 1발이면
+   * baseAngle 그대로, 스택이 있으면 baseAngle을 중심으로 15° 간격 부채꼴로
+   * 균등 확산시킨다(최대 3스택 = 4발). 쌍딱총이 "이 배열 전체"를 한 번 더
+   * 쏘는 방식으로 자연스럽게 합성되도록, 발사 로직은 이 각도 배열만 소비한다. */
+  private computeFiringAngles(baseAngle: number): number[] {
+    const bulletCount = 1 + this.stacksOf("multishot");
+    if (bulletCount <= 1) return [baseAngle];
+
+    const spreadRad = Phaser.Math.DegToRad(MULTISHOT_SPREAD_DEG);
+    const totalSpread = spreadRad * (bulletCount - 1);
+    const start = baseAngle - totalSpread / 2;
+    return Array.from({ length: bulletCount }, (_, i) => start + spreadRad * i);
+  }
+
+  /** 주어진 각도 배열대로 총알을 한 세트 생성한다. 비석치기(ricochet) 스택이
+   * 있으면 각 총알에 남은 튕김 횟수를 데이터로 심어둔다(obstacle collider에서 소비). */
+  private fireBulletSet(angles: readonly number[], originX: number, originY: number) {
+    const bounces = this.stacksOf("ricochet");
+    for (const angle of angles) {
+      const bullet = this.bullets.create(originX, originY, "bullet") as Phaser.Physics.Arcade.Image;
+      this.physics.velocityFromRotation(angle, BULLET_SPEED, bullet.body!.velocity);
+      if (bounces > 0) bullet.setData("bouncesLeft", bounces);
+    }
   }
 
   /** 발사 순간 총구 앞에 잠깐 뜨는 섬광 — 자동사격이라 타격감을 눈으로
@@ -305,7 +440,7 @@ export class DungeonScene extends Phaser.Scene {
   private startReload() {
     if (this.reloading || this.ammo >= this.ammoMax) return;
     this.reloading = true;
-    this.time.delayedCall(RELOAD_MS, () => {
+    this.time.delayedCall(this.effectiveReloadMs(), () => {
       this.ammo = this.ammoMax;
       this.reloading = false;
       EventBus.emit(CombatEvents.AmmoChanged, { current: this.ammo, max: this.ammoMax });
@@ -405,6 +540,38 @@ export class DungeonScene extends Phaser.Scene {
 
   // ── 충돌 처리 ────────────────────────────────────────────────
 
+  /** 비석치기(ricochet) 스택이 있는 총알은 엄폐물에 맞아도 파괴되지 않고
+   * 반사각으로 튕겨 계속 날아간다. 장애물이 축에 정렬된 사각형이라, 정밀한
+   * 충돌면 계산 대신 "더 얕게 겹친 축을 반사면으로 본다"는 근사치를 쓴다 —
+   * 완벽한 물리는 아니어도 "튕겨 나간다"는 느낌은 충분히 낸다. */
+  private onBulletHitObstacle(
+    bullet: Phaser.Physics.Arcade.Image,
+    obstacle: Phaser.Physics.Arcade.Image,
+  ) {
+    if (!bullet.active) return;
+
+    const bouncesLeft = (bullet.getData("bouncesLeft") as number | undefined) ?? 0;
+    if (bouncesLeft <= 0) {
+      bullet.destroy();
+      return;
+    }
+
+    const body = bullet.body as Phaser.Physics.Arcade.Body;
+    const obstacleBody = obstacle.body as Phaser.Physics.Arcade.StaticBody;
+    const dx = bullet.x - obstacle.x;
+    const dy = bullet.y - obstacle.y;
+    const overlapX = obstacleBody.halfWidth - Math.abs(dx);
+    const overlapY = obstacleBody.halfHeight - Math.abs(dy);
+
+    if (overlapX < overlapY) {
+      body.velocity.x *= -1;
+    } else {
+      body.velocity.y *= -1;
+    }
+
+    bullet.setData("bouncesLeft", bouncesLeft - 1);
+  }
+
   private onBulletHitEnemy(
     bullet: Phaser.Physics.Arcade.Image,
     enemy: Phaser.Physics.Arcade.Sprite,
@@ -420,14 +587,33 @@ export class DungeonScene extends Phaser.Scene {
     }
 
     // 기본 방어력(전체 몹 공통) — 총알 데미지에서 고정 경감, 최소 1 데미지는 항상 보장.
-    const dmg = Math.max(1, this.bulletDamage - BASE_ARMOR);
+    const dmg = Math.max(1, Math.round(this.effectiveBulletDamage()) - BASE_ARMOR);
     const hp = (enemy.getData("hp") as number) - dmg;
     enemy.setData("hp", hp);
+
+    this.applyElementalHits(enemy, dmg);
+
     if (hp <= 0) {
       this.killEnemy(enemy);
     } else {
       this.flashHit(enemy);
     }
+  }
+
+  /** 보유한 속성탄(elem_*)을 전부 순회해 명중 효과를 건다 — 스택형이라 여러
+   * 속성탄을 동시에 들고 있으면 전부 함께 적용된다(서로 상쇄 없음). 실제
+   * 상태이상 로직은 병렬 브랜치가 statusEffects.ts에 구현하고, 여기서는
+   * "무엇이 몇 스택 있는지"만 넘겨준다. */
+  private applyElementalHits(enemy: Phaser.Physics.Arcade.Sprite, hitDamage: number) {
+    if (this.appliedUpgrades.size === 0) return;
+    const ctx = { player: this.player, enemies: this.enemies, time: this.time.now };
+    // Map을 for-of로 직접 순회하면 이 프로젝트의 tsconfig(target 미지정 → ES3
+    // 기본값)에서 downlevelIteration 에러가 나서, forEach로 순회한다.
+    this.appliedUpgrades.forEach((stacks, id) => {
+      if (stacks <= 0 || !id.startsWith("elem_")) return;
+      const element = id.slice("elem_".length) as ElementKey;
+      applyElementalOnHit(enemy, element, stacks, hitDamage, ctx);
+    });
   }
 
   private onPlayerHitEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
@@ -568,7 +754,17 @@ export class DungeonScene extends Phaser.Scene {
       this.endRun("cleared");
       return;
     }
-    this.time.delayedCall(600, () => this.startRound(this.roundIndex + 1));
+
+    // 1라운드 클리어 후(pickIndex 1) / 2라운드 클리어 후(pickIndex 2) 업그레이드
+    // 선택을 끼워 넣는다 — 여기 도달했다는 건 clearedCount < ROUND_COUNT(3)이라는
+    // 뜻이라 roundIndex는 항상 0 아니면 1이고, 다음 pickIndex도 자연히 1 또는 2가
+    // 된다. 3라운드(엘리트) 클리어 후에는 위에서 이미 endRun으로 빠져서 4번째
+    // 선택은 생기지 않는다.
+    const nextRoundIndex = this.roundIndex + 1;
+    const pickIndex = nextRoundIndex;
+    this.time.delayedCall(600, () => {
+      this.showUpgradeChoice(pickIndex, () => this.startRound(nextRoundIndex));
+    });
   }
 
   private endRun(result: "cleared" | "died") {
