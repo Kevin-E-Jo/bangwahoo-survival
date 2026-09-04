@@ -495,28 +495,20 @@
     </div>
 
     <h3 style="margin-top:28px">몹 난이도 상향 <span class="badge done">확정</span></h3>
-    <p class="lede">업그레이드로 플레이어가 강해지는 만큼, 몹도 기본적으로 더 버텨야 손맛이 유지된다는 판단으로 함께 확정. 아래는 현재 구현된 <code class="field">ARCHETYPE_STATS</code>(<a href="https://github.com/Kevin-E-Jo/bangwahoo-survival/blob/master/src/game/scenes/DungeonScene.ts">DungeonScene.ts</a>) 기준 변경안이다.</p>
+    <p class="lede">업그레이드로 플레이어가 강해지는 만큼, 몹도 기본적으로 더 버텨야 손맛이 유지된다는 판단으로 함께 확정. 세부 배율까지 전부 정해짐 — 아래는 현재 구현된 <code class="field">ARCHETYPE_STATS</code>(<a href="https://github.com/Kevin-E-Jo/bangwahoo-survival/blob/master/src/game/scenes/DungeonScene.ts">DungeonScene.ts</a>) 기준 최종 변경값이다.</p>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>유형</th><th class="mono">현재 체력</th><th class="mono">체력 ×1.5</th></tr></thead>
+        <thead><tr><th>유형</th><th class="mono">체력(전)</th><th class="mono">체력(후)</th><th class="mono">접촉데미지(전)</th><th class="mono">접촉데미지(후)</th><th class="mono">방어력</th></tr></thead>
         <tbody>
-          <tr><td>일반</td><td class="mono">20</td><td class="mono">30</td></tr>
-          <tr><td>탱크형</td><td class="mono">60</td><td class="mono">90</td></tr>
-          <tr><td>스피드형</td><td class="mono">10</td><td class="mono">15</td></tr>
-          <tr><td>롤러형</td><td class="mono">30</td><td class="mono">45</td></tr>
-          <tr><td>엘리트</td><td class="mono">70</td><td class="mono">105</td></tr>
+          <tr><td>일반</td><td class="mono">20</td><td class="mono">30</td><td class="mono">12</td><td class="mono">18</td><td class="mono">2</td></tr>
+          <tr><td>탱크형</td><td class="mono">60</td><td class="mono">90</td><td class="mono">16</td><td class="mono">24</td><td class="mono">2</td></tr>
+          <tr><td>스피드형</td><td class="mono">10</td><td class="mono">15</td><td class="mono">10</td><td class="mono">15</td><td class="mono">2</td></tr>
+          <tr><td>롤러형</td><td class="mono">30</td><td class="mono">45</td><td class="mono">18</td><td class="mono">27</td><td class="mono">2</td></tr>
+          <tr><td>엘리트(×1.75)</td><td class="mono">70</td><td class="mono">123</td><td class="mono">25</td><td class="mono">44</td><td class="mono">2</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="lede">여기에 <strong>기본 방어력(armor)</strong>을 새 스탯으로 추가한다 — 총알 데미지에서 고정값만큼 경감시키는 방식(예: 일반 몹 공통 <code class="field">armor: 2</code> → 기본 총알 데미지 10이 실질 8로 들어감). 최소 1 데미지는 항상 보장(클램프)해서, 방어력 때문에 못 죽이는 몹이 생기지 않게 한다. 스탯 강화계의 "데미지 강화" 업그레이드가 이 방어력을 무력화하는 손맛을 겸하게 된다.</p>
-    <div class="callout">
-      <p class="eyebrow">이어지는 열린 질문</p>
-      <ul>
-        <li>방어력을 전체 몹 공통 고정값으로 할지, 유형별로 차등(탱크형은 더 높게 등)을 둘지</li>
-        <li>접촉 데미지(<code class="field">contactDamage</code>)도 같이 올릴지, 체력·방어력만 손댈지</li>
-        <li>엘리트도 같은 배율(×1.5)을 적용할지, 이미 라운드 3 마무리 역할이라 별도 배율을 둘지</li>
-      </ul>
-    </div>
+    <p class="lede">일반·탱크·스피드·롤러형은 체력·접촉데미지 모두 <strong>×1.5</strong>. 엘리트는 이미 다른 몹보다 강하다는 점을 살려 <strong>×1.75</strong>로 별도 스케일 — 라운드 3의 "확실한 진짜 보스" 체감을 더 키운다. <strong>기본 방어력</strong>은 차등 없이 전체 공통 <code class="field">armor: 2</code>(엘리트 포함) — 총알 데미지에서 고정 경감(최소 1 데미지는 항상 보장). 스탯 강화계의 "데미지 강화" 업그레이드가 이 방어력을 무력화하는 손맛을 겸한다.</p>
 
     <div class="callout">
       <p class="eyebrow">열린 질문 — 첨삭 포인트</p>
