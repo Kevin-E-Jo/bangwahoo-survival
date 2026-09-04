@@ -104,6 +104,10 @@ docs/blueprint.html   팀 내부 설계 문서
 
 최신 항목이 위로 온다.
 
+- **2026-09-05** — 런 한정 업그레이드 시스템(멀티샷/더블샷/도탄, 스탯 강화,
+  불·물 속성탄) 설계 초안을 [docs/blueprint.html](./docs/blueprint.html)에
+  추가. 구현 전 검토용 — 선택 시점, 카테고리별 스펙, 기존 아키텍처(시드 기반
+  RNG·서버 검증 모델)와의 통합 지점, 확정 안 된 열린 질문까지 정리.
 - **2026-09-05** — [PR #6](https://github.com/Kevin-E-Jo/bangwahoo-survival/pull/6)
   (몹 다양성) 머지.
 - **2026-09-05** — 엘리트 외 일반 몹 3종 추가: 느리고 체력 많은 탱크형, 빠르고
@@ -137,6 +141,8 @@ docs/blueprint.html   팀 내부 설계 문서
 
 ## 남은 작업 (로드맵)
 
+- 업그레이드 시스템 — 설계 초안 첨삭 완료 후 구현 착수
+  ([docs/blueprint.html](./docs/blueprint.html#upgrades))
 - 실제 배포(Vercel) 및 스크린샷/플레이 영상 추가
 
 ---
