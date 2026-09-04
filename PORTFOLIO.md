@@ -104,6 +104,14 @@ docs/blueprint.html   팀 내부 설계 문서
 
 최신 항목이 위로 온다.
 
+- **2026-09-05** — 업그레이드 시스템 두 병렬 브랜치(`feature/combat-upgrades-core`,
+  `feature/combat-elements`)를 `feature/combat`에 통합 완료 — 예상됐던
+  `statusEffects.ts` placeholder→실구현 교체 충돌 1건만 발생, 나머지는 깔끔히
+  병합. 병합 후 실제 게임에서 통합 지점(픽업 UI로 선택 → 실제 총알 발사 →
+  방어력 계산 → 속성 효과 발동)을 직접 실행해 확인 — 자석탄 효과가 실제로
+  주변 몹을 끌어당기는 것까지 라이브로 검증. 개별 브랜치 검증만으론 알 수
+  없었던 지점. [PR #7](https://github.com/Kevin-E-Jo/bangwahoo-survival/pull/7)에
+  전체 반영, 머지 대기 중.
 - **2026-09-05** — [METHODOLOGY.md](./docs/METHODOLOGY.md)에 원칙 12·13 추가.
   업그레이드 시스템을 `feature/combat-upgrades-core`/`feature/combat-elements`
   두 하위 worktree로 나눠 병렬 작업하며 실제로 쓰인 "함수 시그니처를 얼려
