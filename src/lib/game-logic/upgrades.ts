@@ -74,6 +74,38 @@ const PATTERN_UPGRADES: readonly UpgradeDef[] = [
     maxStacks: 2,
     unique: false,
   },
+  // 아래 3개(부비트랩·자동 딱총·폭탄 던지기)는 블루프린트 「플레이어 신규 공격
+  // 패턴」 확정본 — 메인 총알 발사 파이프라인을 건드리는 위 3개와 달리, 각자
+  // 자기만의 쿨다운·투사체를 새로 갖는 하위 시스템이다(실제 로직은
+  // src/game/newAttackPatterns.ts). 스택형으로 키울 근거가 문서에 없어서
+  // 쌍딱총과 같은 유니크(평생 1회)로 둔다.
+  {
+    id: "mine",
+    category: "pattern",
+    name: "부비트랩",
+    description:
+      "4초마다 발밑에 자동 설치, 최대 3개 유지(초과 시 가장 오래된 것부터 소멸) — 적이 밟으면 폭발(유니크 — 평생 1회만 선택 가능)",
+    maxStacks: 1,
+    unique: true,
+  },
+  {
+    id: "turret",
+    category: "pattern",
+    name: "자동 딱총",
+    description:
+      "메인 총과 별개로 가장 가까운 적에게 자동 발사 — 데미지 메인 총의 50%, 쿨다운 메인 총의 2배(보조 화력, 유니크 — 평생 1회만 선택 가능)",
+    maxStacks: 1,
+    unique: true,
+  },
+  {
+    id: "bomb",
+    category: "pattern",
+    name: "폭탄 던지기",
+    description:
+      "가장 가까운 적의 위치로 포물선 투척, 착지 후 짧은 지연 뒤 폭발(광역 데미지) — 별도 조작 없이 자동 발사(유니크 — 평생 1회만 선택 가능)",
+    maxStacks: 1,
+    unique: true,
+  },
 ];
 
 const STAT_UPGRADES: readonly UpgradeDef[] = [
@@ -140,7 +172,7 @@ const ELEMENT_UPGRADES: readonly UpgradeDef[] = ELEMENT_KEYS.map((key) => ({
   unique: false,
 }));
 
-/** 전체 17종 업그레이드 카탈로그(패턴 3 + 스탯 5 + 속성탄 9). */
+/** 전체 20종 업그레이드 카탈로그(패턴 6 + 스탯 5 + 속성탄 9). */
 export const UPGRADE_CATALOG: readonly UpgradeDef[] = [
   ...PATTERN_UPGRADES,
   ...STAT_UPGRADES,

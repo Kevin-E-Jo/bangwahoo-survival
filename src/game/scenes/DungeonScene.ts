@@ -14,6 +14,7 @@ import { CombatEvents, type RunEndedPayload, type UpgradeChosenPayload } from ".
 import { pickMapLayout, type ObstacleType } from "../maps";
 import { applyElementalOnHit, tickStatusEffects } from "../statusEffects";
 import { onEnemyProjectileHitObstacle, onEnemyProjectileHitPlayer, tickEnemyRanged } from "../enemyRanged";
+import { AttackPatternsController } from "../newAttackPatterns";
 
 const OBSTACLE_TEXTURE: Record<ObstacleType, string> = {
   box: "obstacle_box",
@@ -23,6 +24,12 @@ const OBSTACLE_TEXTURE: Record<ObstacleType, string> = {
 
 export const CANVAS_W = 960;
 export const CANVAS_H = 540;
+
+// 월드(=물리 경계·카메라 스크롤 범위)는 뷰포트(CANVAS_W/H)의 2.5배(블루프린트
+// 「카메라 추적 + 월드 확장」). 뷰포트는 화면에 보이는 크기 그대로 유지하고,
+// 카메라가 플레이어를 따라다니며 이 월드 안을 스크롤한다.
+export const WORLD_W = 2400;
+export const WORLD_H = 1350;
 
 const PLAYER_SPEED = 220;
 const PLAYER_MAX_HP = 100;
@@ -37,6 +44,18 @@ const ELITE_CONTACT_DAMAGE = 44; // 25 × 1.75
 // 항상 보장, onBulletHitEnemy 참고).
 const BASE_ARMOR = 2;
 
+// 이동속도 전반 상향(blueprint#expansion2 「이동속도 전반 상향」): 기존 4개
+// 유형 속도 ×1.15. 블루프린트 예시(일반 70→80, 탱크 40→46, 스피드 150→172)와
+// 정확히 맞추려고 Math.floor(base*1.15)로 계산한 값을 그대로 하드코딩한다
+// (예: 70*1.15=80.5 → 80).
+const BOMBER_SPEED = 110; // 신규 유형 — 기존 4종 상향 대상이 아니라 블루프린트 확정치를 그대로 사용
+
+// 🧨 폭탄돌리기 상태머신 상수 — updateBomber()/explodeBomber() 참고.
+const BOMBER_TRIGGER_RANGE = 40; // 이 거리 안으로 들어오면 예열 시작(블루프린트 확정치)
+const BOMBER_PRIME_MS = 450; // 예열(텔레그래프) 지속 시간 — "짧게 깜빡이다 터짐"
+const BOMBER_BLINK_MS = 90; // 예열 중 깜빡임 토글 주기
+const BOMBER_EXPLOSION_DAMAGE = 35; // 광역 폭발 데미지(자폭 리스크 보상 — 다른 접촉 데미지보다 높게 판단)
+
 /** 엘리트를 제외한 일반 몹 유형별 스탯. 어떤 유형이 몇 마리 나오는지는
  * game-logic/runPlan.ts(시드 기반, 서버·클라 공유)가 정하고, 여기서는 유형별
  * 수치·스프라이트만 관리한다. */
@@ -44,11 +63,24 @@ const ARCHETYPE_STATS: Record<
   EnemyArchetype,
   { hp: number; speed: number; contactDamage: number; spriteBase: string }
 > = {
-  normal: { hp: 30, speed: 70, contactDamage: 18, spriteBase: "enemy" },
-  tank: { hp: 90, speed: 40, contactDamage: 24, spriteBase: "enemy-tank" },
-  speedster: { hp: 15, speed: 150, contactDamage: 15, spriteBase: "enemy-speed" },
+  normal: { hp: 30, speed: 80, contactDamage: 18, spriteBase: "enemy" },
+  tank: { hp: 90, speed: 46, contactDamage: 24, spriteBase: "enemy-tank" },
+  speedster: { hp: 15, speed: 172, contactDamage: 15, spriteBase: "enemy-speed" },
   // speed는 "구르기" 돌진 중에만 쓰인다 — 평소엔 방패를 든 채 정지.
-  roller: { hp: 45, speed: 260, contactDamage: 27, spriteBase: "enemy-roller" },
+  roller: { hp: 45, speed: 299, contactDamage: 27, spriteBase: "enemy-roller" },
+  // 🧨 폭탄돌리기(신규, blueprint#expansion2) — 빠르게 직진 추적하다 플레이어
+  // 반경 40px 이내 접근 시 예열 후 자폭(광역 데미지 + 자기 자신 소멸). hp는
+  // 블루프린트에 수치가 없어 직접 판단: speedster(15)보다 약간 튼튼해 접근
+  // 중 총알 몇 발은 버티되, 위협도가 높은 만큼 여전히 쉽게 저지 가능한 값으로
+  // 20을 골랐다. contactDamage는 폭발 데미지와 동일하게 맞춰서, 예열 중
+  // 플레이어가 실수로 몸을 부딪혀 일반 접촉 판정(onPlayerHitEnemy)이 먼저
+  // 발동해도 결과가 폭발과 같아지도록 한다.
+  bomber: {
+    hp: 20,
+    speed: BOMBER_SPEED,
+    contactDamage: BOMBER_EXPLOSION_DAMAGE,
+    spriteBase: "enemy-bomber",
+  },
 };
 
 const ROLLER_GUARD_MS = 900; // 방패를 든 채 정지해있는 시간
@@ -111,6 +143,9 @@ export class DungeonScene extends Phaser.Scene {
   // 몹 원거리 공격 투사체(docs/blueprint.html#expansion2 "1. 몹 원거리 공격") —
   // 실제 예열·발사 로직은 enemyRanged.ts 소관, 여기서는 그룹·충돌만 연결한다.
   private enemyProjectiles!: Phaser.Physics.Arcade.Group;
+  // 부비트랩·자동 딱총·폭탄 던지기(신규 공격 패턴 3종) 전담 컨트롤러 —
+  // 실제 로직은 newAttackPatterns.ts 소관, DungeonScene은 생성 + tick() 호출만.
+  private attackPatterns!: AttackPatternsController;
 
   private hp = PLAYER_MAX_HP;
   // ammoMaxBase는 마을 상점(town shop) 영구 업그레이드까지만 반영한 값이고,
@@ -155,10 +190,10 @@ export class DungeonScene extends Phaser.Scene {
   create() {
     this.startedAtMs = this.time.now;
 
-    this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0xf2f3ec);
-    this.add.tileSprite(0, 0, CANVAS_W, CANVAS_H, "ground").setOrigin(0, 0);
+    this.add.rectangle(WORLD_W / 2, WORLD_H / 2, WORLD_W, WORLD_H, 0xf2f3ec);
+    this.add.tileSprite(0, 0, WORLD_W, WORLD_H, "ground").setOrigin(0, 0);
 
-    this.physics.world.setBounds(0, 0, CANVAS_W, CANVAS_H);
+    this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
 
     this.obstacles = this.physics.add.staticGroup();
     const mapLayout = pickMapLayout(this.seed);
@@ -166,10 +201,15 @@ export class DungeonScene extends Phaser.Scene {
       this.obstacles.create(o.x, o.y, OBSTACLE_TEXTURE[o.type]);
     }
 
-    this.player = this.physics.add.sprite(CANVAS_W / 2, CANVAS_H / 2, "player");
+    this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "player");
     this.player.setCollideWorldBounds(true);
     this.player.body?.setSize(20, 28);
     this.player.setData("baseKey", "player");
+
+    // 카메라 추적(블루프린트 「카메라 추적 + 월드 확장」) — 뷰포트는 그대로,
+    // 월드가 더 커진 만큼 카메라가 플레이어를 부드럽게 따라간다.
+    this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
     this.aimLine = this.add.graphics();
     this.muzzleFlash = this.add.circle(0, 0, 6, 0xffffff, 0.9).setVisible(false);
@@ -207,6 +247,20 @@ export class DungeonScene extends Phaser.Scene {
       );
     });
 
+    this.attackPatterns = new AttackPatternsController({
+      scene: this,
+      getPlayer: () => this.player,
+      getEnemies: () => this.enemies,
+      getBullets: () => this.bullets,
+      isEnded: () => this.ended,
+      stacksOf: (id) => this.stacksOf(id),
+      effectiveBulletDamage: () => this.effectiveBulletDamage(),
+      effectiveFireCooldownMs: () => this.effectiveFireCooldownMs(),
+      findNearestEnemy: () => this.findNearestEnemy(),
+      applyAoeDamage: (x, y, radius, rawDamage) => this.applyAoeDamage(x, y, radius, rawDamage),
+    });
+    this.attackPatterns.setup();
+
     const keyboard = this.input.keyboard;
     if (!keyboard) throw new Error("keyboard input unavailable");
     this.cursors = keyboard.createCursorKeys();
@@ -235,6 +289,7 @@ export class DungeonScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.startReload();
     this.updateAutoAim(time);
     this.updateEnemyHoming();
+    this.attackPatterns.tick(time);
 
     // 몹 원거리 공격(예열·발사) 진행 — updateEnemyHoming() 이후에 호출해야
     // 예열 중 이동 정지가 추적 이동에 덮어써지지 않는다.
@@ -495,6 +550,10 @@ export class DungeonScene extends Phaser.Scene {
         this.updateRoller(enemy, time);
         continue;
       }
+      if (archetype === "bomber") {
+        this.updateBomber(enemy, time);
+        continue;
+      }
       this.homeTowardPlayer(enemy, ARCHETYPE_STATS[archetype].speed, time);
     }
   }
@@ -537,15 +596,58 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
+  /** 🧨 폭탄돌리기(자폭몹)의 움직임: 평소엔 빠르게 직진 추적하다가, 플레이어
+   * 반경 BOMBER_TRIGGER_RANGE 이내로 들어오면 그 자리에 멈춰 서서 짧게
+   * 깜빡이는 예열(텔레그래프)에 들어가고, 예열이 끝나면 폭발한다. 예열 중
+   * 총알에 맞아 죽으면(onBulletHitEnemy → killEnemy) "dying" 플래그가 서서
+   * updateEnemyHoming 진입부에서 걸러지므로 이 함수 자체가 더 이상 호출되지
+   * 않는다 — 즉 폭발 없이 그냥 죽는 경로는 별도 분기 없이 자연히 보장된다. */
+  private updateBomber(enemy: Phaser.Physics.Arcade.Sprite, time: number) {
+    const state = (enemy.getData("bomberState") as "chasing" | "priming" | undefined) ?? "chasing";
+
+    if (state === "priming") {
+      const stateAt = (enemy.getData("bomberStateAt") as number | undefined) ?? time;
+      // 깜빡임 텔레그래프 — updateWalkFrame과 같은 "시간 기반 토글" 방식이라
+      // 별도 tween을 만들고 정리(destroy 시 kill 등)할 필요가 없다.
+      const blinkOn = Math.floor((time - stateAt) / BOMBER_BLINK_MS) % 2 === 0;
+      enemy.setTintFill(blinkOn ? 0xff3b30 : 0xffffff);
+      if (time - stateAt >= BOMBER_PRIME_MS) {
+        this.explodeBomber(enemy);
+      }
+      return;
+    }
+
+    const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+    if (dist <= BOMBER_TRIGGER_RANGE) {
+      enemy.setData("bomberState", "priming");
+      enemy.setData("bomberStateAt", time);
+      enemy.setVelocity(0, 0);
+      return;
+    }
+    this.homeTowardPlayer(enemy, BOMBER_SPEED, time);
+  }
+
+  /** 예열이 끝났을 때 실제 폭발 처리 — 그 순간에도 플레이어가 폭발 반경
+   * 안에 있어야 데미지가 들어간다(예열 중 플레이어가 도망치면 피해를 회피할
+   * 수 있다는 뜻 — 다른 텔레그래프 공격들과 동일한 "피할 시간을 준다" 원칙). */
+  private explodeBomber(enemy: Phaser.Physics.Arcade.Sprite) {
+    if (enemy.getData("dying")) return;
+    const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+    if (dist <= BOMBER_TRIGGER_RANGE) {
+      this.damagePlayer(BOMBER_EXPLOSION_DAMAGE);
+    }
+    this.killEnemy(enemy);
+  }
+
   private cleanupOffscreenBullets() {
     for (const bulletObj of this.bullets.getChildren()) {
       const bullet = bulletObj as Phaser.Physics.Arcade.Image;
       if (!bullet.active) continue;
       if (
         bullet.x < -16 ||
-        bullet.x > CANVAS_W + 16 ||
+        bullet.x > WORLD_W + 16 ||
         bullet.y < -16 ||
-        bullet.y > CANVAS_H + 16
+        bullet.y > WORLD_H + 16
       ) {
         bullet.destroy();
       }
@@ -561,7 +663,7 @@ export class DungeonScene extends Phaser.Scene {
     for (const enemyObj of this.enemies.getChildren()) {
       const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
       if (!enemy.active) continue;
-      if (enemy.x < -60 || enemy.x > CANVAS_W + 60 || enemy.y < -60 || enemy.y > CANVAS_H + 60) {
+      if (enemy.x < -60 || enemy.x > WORLD_W + 60 || enemy.y < -60 || enemy.y > WORLD_H + 60) {
         enemy.destroy();
         enemyEscaped = true;
       }
@@ -617,8 +719,11 @@ export class DungeonScene extends Phaser.Scene {
       return;
     }
 
+    // 자동 딱총(turret) 총알은 별도 데미지(메인 총의 50%)를 데이터로 심어서
+    // 넘어온다 — 그 외엔 메인 총알과 완전히 같은 피격 파이프라인을 그대로 탄다.
+    const overrideDamage = bullet.getData("damageOverride") as number | undefined;
     // 기본 방어력(전체 몹 공통) — 총알 데미지에서 고정 경감, 최소 1 데미지는 항상 보장.
-    const dmg = Math.max(1, Math.round(this.effectiveBulletDamage()) - BASE_ARMOR);
+    const dmg = Math.max(1, Math.round(overrideDamage ?? this.effectiveBulletDamage()) - BASE_ARMOR);
     const hp = (enemy.getData("hp") as number) - dmg;
     enemy.setData("hp", hp);
 
@@ -647,22 +752,61 @@ export class DungeonScene extends Phaser.Scene {
     });
   }
 
+  /** 부비트랩·폭탄 던지기(newAttackPatterns.ts)가 쓰는 광역 데미지 진입점.
+   * onBulletHitEnemy와 같은 규칙(방어력 경감·최소 1뎀 보장·롤러형 방패 차단·
+   * 속성탄 적용·사망 연출)을 그대로 따른다 — 총알이 아니라 폭발이라는
+   * 점만 다르고 "명중 처리"의 본질은 같다고 보고 파이프라인을 공유한다. */
+  private applyAoeDamage(x: number, y: number, radius: number, rawDamage: number) {
+    const dmg = Math.max(1, Math.round(rawDamage) - BASE_ARMOR);
+    for (const enemyObj of this.enemies.getChildren()) {
+      const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
+      if (!enemy.active || enemy.getData("dying")) continue;
+      const dist = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
+      if (dist > radius) continue;
+
+      const archetype = enemy.getData("archetype") as EnemyArchetype | undefined;
+      if (archetype === "roller" && enemy.getData("rollState") !== "rolling") {
+        this.flashHit(enemy, 0xffe066);
+        continue;
+      }
+
+      const hp = (enemy.getData("hp") as number) - dmg;
+      enemy.setData("hp", hp);
+      this.applyElementalHits(enemy, dmg);
+
+      if (hp <= 0) {
+        this.killEnemy(enemy);
+      } else {
+        this.flashHit(enemy);
+      }
+    }
+  }
+
   private onPlayerHitEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
     if (this.ended || !enemy.active || enemy.getData("dying")) return;
+    const contactDamage = enemy.getData("contactDamage") as number;
+    // 접촉 무적 시간 중이면 데미지가 안 들어가고(damagePlayer가 false 반환),
+    // 이 경우 적도 죽이지 않는다 — 무적이 끝난 뒤 다시 부딪혀야 판정되게
+    // 기존 동작을 그대로 유지(damagePlayer로 추출하기 전부터의 동작).
+    if (this.damagePlayer(contactDamage)) this.killEnemy(enemy);
+  }
+
+  /** 플레이어 피격 공통 처리 — 접촉 데미지(onPlayerHitEnemy)와 폭탄돌리기
+   * 자폭 데미지(explodeBomber)가 함께 쓴다. 접촉 무적 시간(lastHitAt) 안이면
+   * 데미지를 주지 않고 false를 반환한다(호출부가 그에 맞춰 후속 처리를
+   * 건너뛸 수 있도록). */
+  private damagePlayer(amount: number): boolean {
+    if (this.ended) return false;
     const now = this.time.now;
-    if (now - this.lastHitAt < CONTACT_INVULN_MS) return;
+    if (now - this.lastHitAt < CONTACT_INVULN_MS) return false;
     this.lastHitAt = now;
 
-    const contactDamage = enemy.getData("contactDamage") as number;
-    this.hp = Math.max(0, this.hp - contactDamage);
+    this.hp = Math.max(0, this.hp - amount);
     EventBus.emit(CombatEvents.HpChanged, { current: this.hp, max: PLAYER_MAX_HP });
     this.flashHit(this.player);
-    this.killEnemy(enemy);
 
-    if (this.hp <= 0) {
-      this.endRun("died");
-      return;
-    }
+    if (this.hp <= 0) this.endRun("died");
+    return true;
   }
 
   /** 적 투사체(딱지/돌멩이/새총알/책장)에 맞았을 때 데미지 적용 — 접촉 피격
@@ -749,6 +893,10 @@ export class DungeonScene extends Phaser.Scene {
             enemy.setData("rollState", "guard");
             enemy.setData("rollStateAt", this.time.now);
           }
+          if (spawn.archetype === "bomber") {
+            enemy.setData("bomberState", "chasing");
+            enemy.setData("bomberStateAt", this.time.now);
+          }
         }
       });
     });
@@ -756,17 +904,20 @@ export class DungeonScene extends Phaser.Scene {
     this.time.delayedCall(spawns.length * SPAWN_STAGGER_MS + 50, () => this.checkWaveClear());
   }
 
-  /** 화면 가장자리 바로 밖 임의의 지점 — 사방에서 플레이어를 향해 등장한다. */
+  /** 월드 가장자리 바로 밖 임의의 지점 — 사방에서 플레이어를 향해 등장한다.
+   * 월드가 뷰포트보다 커진 뒤로는 "화면 밖"이 아니라 "월드 밖"에서 스폰돼야
+   * 카메라가 플레이어를 따라갈 때도 몹이 항상 월드 경계 바깥에서 자연스럽게
+   * 걸어 들어온다. */
   private randomEdgePoint(): { x: number; y: number } {
     switch (Phaser.Math.Between(0, 3)) {
       case 0:
-        return { x: Phaser.Math.Between(0, CANVAS_W), y: -SPAWN_MARGIN };
+        return { x: Phaser.Math.Between(0, WORLD_W), y: -SPAWN_MARGIN };
       case 1:
-        return { x: Phaser.Math.Between(0, CANVAS_W), y: CANVAS_H + SPAWN_MARGIN };
+        return { x: Phaser.Math.Between(0, WORLD_W), y: WORLD_H + SPAWN_MARGIN };
       case 2:
-        return { x: -SPAWN_MARGIN, y: Phaser.Math.Between(0, CANVAS_H) };
+        return { x: -SPAWN_MARGIN, y: Phaser.Math.Between(0, WORLD_H) };
       default:
-        return { x: CANVAS_W + SPAWN_MARGIN, y: Phaser.Math.Between(0, CANVAS_H) };
+        return { x: WORLD_W + SPAWN_MARGIN, y: Phaser.Math.Between(0, WORLD_H) };
     }
   }
 

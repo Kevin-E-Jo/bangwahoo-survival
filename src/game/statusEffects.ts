@@ -13,10 +13,11 @@ const CANVAS_H = 540;
 // 이 사본은 수동으로 맞춰야 함 — archetype 필드가 없는 경우, 즉 엘리트나
 // 데이터가 안 채워진 경우엔 일반 몹 속도로 대충 폴백).
 const ARCHETYPE_SPEED_FALLBACK: Record<string, number> = {
-  normal: 70,
-  tank: 40,
-  speedster: 150,
-  roller: 260,
+  normal: 80,
+  tank: 46,
+  speedster: 172,
+  roller: 299,
+  bomber: 110,
 };
 const ELITE_SPEED_FALLBACK = 55;
 const DEFAULT_SPEED_FALLBACK = 70;

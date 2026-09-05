@@ -28,6 +28,8 @@ const PALETTE = {
   projStone: 0x9c9689,
   projSling: 0xc4694a,
   projBook: 0xf7f3e6,
+  bomberBody: 0xd6432c, // 위험을 바로 알아보게 붉은 계열(경고색)
+  bomberOutline: 0x8a2418,
 };
 
 function ensure(scene: Phaser.Scene, key: string, draw: (g: Phaser.GameObjects.Graphics) => void, size: number) {
@@ -132,6 +134,40 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
 
   ensure(
     scene,
+    "mine",
+    (g) => {
+      g.fillStyle(PALETTE.obstacle, 1);
+      g.fillCircle(10, 10, 9);
+      g.lineStyle(2, PALETTE.obstacleOutline, 1);
+      g.strokeCircle(10, 10, 9);
+      g.fillStyle(0xd4537e, 1);
+      g.fillCircle(10, 10, 3);
+    },
+    20,
+  );
+
+  ensure(
+    scene,
+    "bomb",
+    (g) => {
+      g.fillStyle(0x3a3a3a, 1);
+      g.fillCircle(10, 11, 7);
+    },
+    20,
+  );
+
+  ensure(
+    scene,
+    "turret_bullet",
+    (g) => {
+      g.fillStyle(PALETTE.pickup, 1);
+      g.fillCircle(4, 4, 4);
+    },
+    8,
+  );
+
+  ensure(
+    scene,
     "ground",
     (g) => {
       g.fillStyle(PALETTE.ground, 1);
@@ -202,5 +238,17 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
       g.strokeCircle(16, 16, 15);
     },
     32,
+  );
+
+  ensure(
+    scene,
+    "enemy-bomber",
+    (g) => {
+      g.fillStyle(PALETTE.bomberBody, 1);
+      g.fillCircle(13, 13, 12);
+      g.lineStyle(2, PALETTE.bomberOutline, 1);
+      g.strokeCircle(13, 13, 12);
+    },
+    26,
   );
 }
