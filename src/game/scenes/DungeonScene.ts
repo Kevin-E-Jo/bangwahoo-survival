@@ -408,10 +408,19 @@ export class DungeonScene extends Phaser.Scene {
     const bulletCount = 1 + this.stacksOf("multishot");
     if (bulletCount <= 1) return [baseAngle];
 
+    // 짝수 개일 때 좌우 대칭으로만 벌리면 정중앙(진짜 조준각)엔 총알이 하나도
+    // 안 간다(2발 = -7.5°/+7.5°뿐이라 가운데 타겟은 항상 빗나감). 그래서 항상
+    // baseAngle을 하나 포함시키고, 나머지를 좌→우→좌→우 순서로 덧붙인다 —
+    // 홀수 개는 기존과 동일한 대칭 부채꼴이 되고, 짝수 개만 가운데 하나 +
+    // 한쪽으로 치우친 나머지가 된다.
     const spreadRad = Phaser.Math.DegToRad(MULTISHOT_SPREAD_DEG);
-    const totalSpread = spreadRad * (bulletCount - 1);
-    const start = baseAngle - totalSpread / 2;
-    return Array.from({ length: bulletCount }, (_, i) => start + spreadRad * i);
+    const angles = [baseAngle];
+    for (let extra = 1; extra < bulletCount; extra++) {
+      const step = Math.ceil(extra / 2) * spreadRad;
+      const sign = extra % 2 === 1 ? 1 : -1;
+      angles.push(baseAngle + sign * step);
+    }
+    return angles;
   }
 
   /** 주어진 각도 배열대로 총알을 한 세트 생성한다. 비석치기(ricochet) 스택이

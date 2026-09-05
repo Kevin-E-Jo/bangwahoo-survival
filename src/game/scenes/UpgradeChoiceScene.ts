@@ -69,11 +69,15 @@ export class UpgradeChoiceScene extends Phaser.Scene {
     );
     shell.setStrokeStyle(3, 0x24231f, 0.6);
     const seam = this.add.rectangle(0, 0, CAPSULE_RADIUS * 2, 6, 0x24231f, 0.35);
+    // 예전엔 "?"만 보이는 뽑기 연출이었는데, 3장 다 안 보이니 선택이 아니라
+    // 순수 뽑기처럼 느껴진다는 피드백으로 이름을 바로 보여주는 방식으로 확정.
     const hint = this.add
-      .text(0, 0, "?", {
-        fontFamily: "monospace",
-        fontSize: "22px",
+      .text(0, 0, card.name, {
+        fontFamily: "sans-serif",
+        fontSize: "13px",
         color: "#24231f",
+        align: "center",
+        wordWrap: { width: CAPSULE_RADIUS * 1.7 },
       })
       .setOrigin(0.5);
 
