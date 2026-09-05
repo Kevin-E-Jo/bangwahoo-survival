@@ -2,10 +2,15 @@ import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석
 import type { EnemyArchetype } from "@/lib/game-logic";
 
 // docs/blueprint.html#expansion2 "1. 몹 원거리 공격" 구현. 순환 import를
-// 피하려고 DungeonScene.CANVAS_W/H를 여기서 다시 상수로 든다 — maps.ts/
+// 피하려고 DungeonScene.WORLD_W/H를 여기서 다시 상수로 든다 — maps.ts/
 // statusEffects.ts가 이미 쓰는 것과 같은 트릭(DungeonScene.ts 주석 참고).
-const CANVAS_W = 960;
-const CANVAS_H = 540;
+// 주의: 여기는 캔버스(뷰포트, 960x540)가 아니라 월드 크기를 써야 한다 —
+// 카메라 추적 + 월드 확장(blueprint#expansion2 "5") 이후로 몹·투사체는
+// 뷰포트 밖 월드 전역에서 살아있어야 하기 때문. 캔버스 크기로 걸러내면
+// 카메라가 비추지 않는 곳의 투사체가 스폰 직후 곧바로 청소되어버린다
+// (실제로 라이브 검증 중 발견 — 병합 직후 통합 테스트로 잡음).
+const WORLD_W = 2400;
+const WORLD_H = 1350;
 
 export interface RangedConfig {
   /** 투사체 텍스처 키(scripts/pixel-art/generate-sprites.js에서 생성). */
@@ -176,7 +181,7 @@ function cleanupOffscreenProjectiles(projectiles: Phaser.Physics.Arcade.Group): 
   for (const obj of projectiles.getChildren()) {
     const proj = obj as Phaser.Physics.Arcade.Image;
     if (!proj.active) continue;
-    if (proj.x < -16 || proj.x > CANVAS_W + 16 || proj.y < -16 || proj.y > CANVAS_H + 16) {
+    if (proj.x < -16 || proj.x > WORLD_W + 16 || proj.y < -16 || proj.y > WORLD_H + 16) {
       proj.destroy();
     }
   }
