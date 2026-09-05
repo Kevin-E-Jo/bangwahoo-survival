@@ -13,6 +13,7 @@ const SPRITE_KEYS = [
   "enemy-speed",
   "enemy-speed-walk",
   "enemy-roller",
+  "enemy-bomber",
   "bullet",
   "pickup",
   "ground",
