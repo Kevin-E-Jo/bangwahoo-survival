@@ -86,6 +86,40 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
 
   ensure(
     scene,
+    "mine",
+    (g) => {
+      g.fillStyle(PALETTE.obstacle, 1);
+      g.fillCircle(10, 10, 9);
+      g.lineStyle(2, PALETTE.obstacleOutline, 1);
+      g.strokeCircle(10, 10, 9);
+      g.fillStyle(0xd4537e, 1);
+      g.fillCircle(10, 10, 3);
+    },
+    20,
+  );
+
+  ensure(
+    scene,
+    "bomb",
+    (g) => {
+      g.fillStyle(0x3a3a3a, 1);
+      g.fillCircle(10, 11, 7);
+    },
+    20,
+  );
+
+  ensure(
+    scene,
+    "turret_bullet",
+    (g) => {
+      g.fillStyle(PALETTE.pickup, 1);
+      g.fillCircle(4, 4, 4);
+    },
+    8,
+  );
+
+  ensure(
+    scene,
     "ground",
     (g) => {
       g.fillStyle(PALETTE.ground, 1);

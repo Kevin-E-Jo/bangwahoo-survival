@@ -13,7 +13,13 @@ export type ElementKey =
   | "flash" // 플래시탄
   | "fear"; // 호루라기탄
 
-export type PatternUpgradeId = "multishot" | "doubleshot" | "ricochet";
+export type PatternUpgradeId =
+  | "multishot"
+  | "doubleshot"
+  | "ricochet"
+  | "mine"
+  | "turret"
+  | "bomb";
 export type StatUpgradeId = "damage" | "firerate" | "movespeed" | "ammo" | "reload";
 export type ElementUpgradeId = `elem_${ElementKey}`;
 export type UpgradeId = PatternUpgradeId | StatUpgradeId | ElementUpgradeId;

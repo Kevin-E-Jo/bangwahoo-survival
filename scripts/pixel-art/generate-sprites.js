@@ -317,6 +317,43 @@ function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, co
   write("bullet", g);
 }
 
+// ── mine: 20x20 direct, 부비트랩 — 압력판 위 경고등(밟으면 터짐을 암시) ──
+{
+  const g = makeGrid(20, 20);
+  const plate = hex("#6C7478");
+  const plateShade = hex("#4E5458");
+  const rim = hex("#8E9598");
+  const light = hex("#D4537E");
+  fillEllipse(g, 10, 10, 8.5, 8.5, (x, y, dx, dy) => (dy > 0.4 ? plateShade : plate));
+  fillEllipse(g, 10, 10, 8.5, 8.5, (x, y, dx, dy) => (dx * dx + dy * dy > 0.82 ? rim : null));
+  fillEllipse(g, 10, 10, 3, 3, () => light);
+  writeDirect("mine", g);
+}
+
+// ── bomb: 20x20 direct, 폭탄 던지기 — 검은 구체 + 심지 ────────────────
+{
+  const g = makeGrid(20, 20);
+  const body = hex("#3A3A3A");
+  const bodyShade = hex("#282828");
+  const fuse = hex("#B98E36");
+  const spark = hex("#E0B85C");
+  fillEllipse(g, 10, 11, 7, 7, (x, y, dx, dy) => (dy > 0.4 ? bodyShade : body));
+  fillRect(g, 10, 2, 11, 5, fuse);
+  fillEllipse(g, 11, 2, 1.6, 1.6, () => spark);
+  writeDirect("bomb", g);
+}
+
+// ── turret_bullet: 4x4 → 8x8, 자동 딱총 전용 탄 — 메인 총알과 구분되는
+// 금색 BB탄(보조 화력임을 색으로도 구분) ─────────────────────────────
+{
+  const body = hex("#E0B85C");
+  const hiC = hex("#F7F3E6");
+  const g = makeGrid(4, 4);
+  fillEllipse(g, 1.8, 1.8, 1.7, 1.7, () => body);
+  setPx(g, 1, 1, hiC);
+  write("turret_bullet", g);
+}
+
 // ── pickup: 10x10 → 20x20, 무기 파츠(다이아몬드 컷) ─────────────────
 {
   const body = hex("#E0B85C");
