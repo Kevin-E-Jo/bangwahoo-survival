@@ -89,8 +89,11 @@ export const UPGRADE_CONFIG: Record<
   UpgradeType,
   { baseCost: number; costGrowth: number; maxLevel: number }
 > = {
-  weaponDamage: { baseCost: 20, costGrowth: 1.6, maxLevel: 5 },
-  weaponAmmo: { baseCost: 25, costGrowth: 1.6, maxLevel: 5 },
+  // 확정된 장기 목표(docs/blueprint.html#expansion2): 최종 레벨까지 총 비용이
+  // 평균 런 수익 기준 약 150런 분량이 되도록 성장률을 크게 올렸다 — 의도적으로
+  // 매우 장기적인 목표.
+  weaponDamage: { baseCost: 20, costGrowth: 1.75, maxLevel: 10 },
+  weaponAmmo: { baseCost: 25, costGrowth: 1.75, maxLevel: 10 },
 };
 
 /** currentLevel에서 다음 레벨로 올리는 데 필요한 비용. */
