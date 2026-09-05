@@ -23,6 +23,12 @@ const OBSTACLE_TEXTURE: Record<ObstacleType, string> = {
 export const CANVAS_W = 960;
 export const CANVAS_H = 540;
 
+// 월드(=물리 경계·카메라 스크롤 범위)는 뷰포트(CANVAS_W/H)의 2.5배(블루프린트
+// 「카메라 추적 + 월드 확장」). 뷰포트는 화면에 보이는 크기 그대로 유지하고,
+// 카메라가 플레이어를 따라다니며 이 월드 안을 스크롤한다.
+export const WORLD_W = 2400;
+export const WORLD_H = 1350;
+
 const PLAYER_SPEED = 220;
 const PLAYER_MAX_HP = 100;
 const CONTACT_INVULN_MS = 500;
@@ -175,10 +181,10 @@ export class DungeonScene extends Phaser.Scene {
   create() {
     this.startedAtMs = this.time.now;
 
-    this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0xf2f3ec);
-    this.add.tileSprite(0, 0, CANVAS_W, CANVAS_H, "ground").setOrigin(0, 0);
+    this.add.rectangle(WORLD_W / 2, WORLD_H / 2, WORLD_W, WORLD_H, 0xf2f3ec);
+    this.add.tileSprite(0, 0, WORLD_W, WORLD_H, "ground").setOrigin(0, 0);
 
-    this.physics.world.setBounds(0, 0, CANVAS_W, CANVAS_H);
+    this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
 
     this.obstacles = this.physics.add.staticGroup();
     const mapLayout = pickMapLayout(this.seed);
@@ -186,10 +192,15 @@ export class DungeonScene extends Phaser.Scene {
       this.obstacles.create(o.x, o.y, OBSTACLE_TEXTURE[o.type]);
     }
 
-    this.player = this.physics.add.sprite(CANVAS_W / 2, CANVAS_H / 2, "player");
+    this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "player");
     this.player.setCollideWorldBounds(true);
     this.player.body?.setSize(20, 28);
     this.player.setData("baseKey", "player");
+
+    // 카메라 추적(블루프린트 「카메라 추적 + 월드 확장」) — 뷰포트는 그대로,
+    // 월드가 더 커진 만큼 카메라가 플레이어를 부드럽게 따라간다.
+    this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
     this.aimLine = this.add.graphics();
     this.muzzleFlash = this.add.circle(0, 0, 6, 0xffffff, 0.9).setVisible(false);
@@ -593,9 +604,9 @@ export class DungeonScene extends Phaser.Scene {
       if (!bullet.active) continue;
       if (
         bullet.x < -16 ||
-        bullet.x > CANVAS_W + 16 ||
+        bullet.x > WORLD_W + 16 ||
         bullet.y < -16 ||
-        bullet.y > CANVAS_H + 16
+        bullet.y > WORLD_H + 16
       ) {
         bullet.destroy();
       }
@@ -611,7 +622,7 @@ export class DungeonScene extends Phaser.Scene {
     for (const enemyObj of this.enemies.getChildren()) {
       const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
       if (!enemy.active) continue;
-      if (enemy.x < -60 || enemy.x > CANVAS_W + 60 || enemy.y < -60 || enemy.y > CANVAS_H + 60) {
+      if (enemy.x < -60 || enemy.x > WORLD_W + 60 || enemy.y < -60 || enemy.y > WORLD_H + 60) {
         enemy.destroy();
         enemyEscaped = true;
       }
@@ -801,17 +812,20 @@ export class DungeonScene extends Phaser.Scene {
     this.time.delayedCall(spawns.length * SPAWN_STAGGER_MS + 50, () => this.checkWaveClear());
   }
 
-  /** 화면 가장자리 바로 밖 임의의 지점 — 사방에서 플레이어를 향해 등장한다. */
+  /** 월드 가장자리 바로 밖 임의의 지점 — 사방에서 플레이어를 향해 등장한다.
+   * 월드가 뷰포트보다 커진 뒤로는 "화면 밖"이 아니라 "월드 밖"에서 스폰돼야
+   * 카메라가 플레이어를 따라갈 때도 몹이 항상 월드 경계 바깥에서 자연스럽게
+   * 걸어 들어온다. */
   private randomEdgePoint(): { x: number; y: number } {
     switch (Phaser.Math.Between(0, 3)) {
       case 0:
-        return { x: Phaser.Math.Between(0, CANVAS_W), y: -SPAWN_MARGIN };
+        return { x: Phaser.Math.Between(0, WORLD_W), y: -SPAWN_MARGIN };
       case 1:
-        return { x: Phaser.Math.Between(0, CANVAS_W), y: CANVAS_H + SPAWN_MARGIN };
+        return { x: Phaser.Math.Between(0, WORLD_W), y: WORLD_H + SPAWN_MARGIN };
       case 2:
-        return { x: -SPAWN_MARGIN, y: Phaser.Math.Between(0, CANVAS_H) };
+        return { x: -SPAWN_MARGIN, y: Phaser.Math.Between(0, WORLD_H) };
       default:
-        return { x: CANVAS_W + SPAWN_MARGIN, y: Phaser.Math.Between(0, CANVAS_H) };
+        return { x: WORLD_W + SPAWN_MARGIN, y: Phaser.Math.Between(0, WORLD_H) };
     }
   }
 
