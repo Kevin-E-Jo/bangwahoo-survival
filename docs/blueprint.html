@@ -167,6 +167,7 @@
     <a href="#interface">씬 간 인터페이스</a>
     <a href="#gameplay">게임플레이</a>
     <a href="#upgrades">업그레이드 시스템</a>
+    <a href="#expansion2">전투 다양화·월드 확장</a>
     <a href="#stack">기술 스택</a>
     <a href="#security">인증·보안</a>
     <a href="#data">데이터 모델</a>
@@ -561,6 +562,171 @@
     <div class="callout">
       <p class="eyebrow">설계 확정 요약</p>
       <p>이 문서에서 다뤘던 모든 열린 질문이 첨삭을 거쳐 확정됐다 — 선택 횟수(3회), 몹 난이도(체력·접촉데미지 ×1.5, 엘리트 ×1.75, 방어력 2 공통), 속성탄 스택형·9종 전부 채택, 도탄은 엄폐물 튕김, 선택 UI는 그 시절 테마 연출, 스탯 강화계 5스택 상한, 업그레이드 이름은 그 시절 느낌으로. 설계 단계에서는 더 이상 남은 미확정 항목이 없다 — 다음 단계는 구현.</p>
+    </div>
+  </section>
+
+  <section id="expansion2">
+    <p class="eyebrow">Design draft · not yet implemented</p>
+    <h2>다음 확장 — 전투 다양화 · 월드 확장 · 경제 재조정 (설계 초안)</h2>
+    <p class="lede">업그레이드 시스템 이후 요청된 7가지를 정리한다. <strong>전부 구현 전 —
+    첨삭을 받기 위한 초안이다.</strong> 명확한 버그는 바로 수정 방식을 확정해
+    적었고, 취향·밸런스가 걸린 항목은 기본안 + 열린 질문으로 남겼다.</p>
+
+    <h3 style="margin-top:8px">1. 몹 원거리 공격 <span class="badge">제안</span></h3>
+    <p class="lede">지금은 몹 전원이 접촉 데미지만 준다 — 엄폐물이 플레이어 총알만 막는 게
+    비대칭적으로 느껴지는 이유이기도 하다. 유형별로 다른 원거리 공격을 붙이면
+    엄폐물이 양방향으로 의미를 가지게 된다.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>유형</th><th>원거리 공격(제안)</th><th class="mono">특징</th></tr></thead>
+        <tbody>
+          <tr><td>일반</td><td>딱지 던지기</td><td class="mono">짧은 사거리, 저데미지, 짧은 예열</td></tr>
+          <tr><td>탱크형</td><td>돌멩이 던지기</td><td class="mono">느린 투사체, 고데미지, 긴 예열(텔레그래프 필수)</td></tr>
+          <tr><td>스피드형</td><td>고무줄 새총</td><td class="mono">빠른 투사체, 저데미지, 예열 거의 없음(이동 중 발사 가능)</td></tr>
+          <tr><td>롤러형</td><td>없음(기존 유지)</td><td class="mono">방패·구르기 정체성이 이미 확실해서 원거리까지 더하면 과함</td></tr>
+          <tr><td>엘리트</td><td>책장 넘기며 페이지 투척</td><td class="mono">부채꼴 다발 투척, 긴 예열</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede">공통 규칙(제안): 예열(telegraph) 있는 공격은 발사 전 짧게 깜빡이거나
+    커지는 연출로 "피할 시간"을 준다. 몹 투사체도 <strong>엄폐물에 막힌다</strong>
+    (플레이어 총알과 동일 규칙) — 그래야 은폐가 공수 양쪽에서 의미를 가진다.</p>
+
+    <h3 style="margin-top:28px">2. 몹 증가 · 자폭몹 · 이동속도 · 드랍률 <span class="badge">제안</span></h3>
+    <div class="grid">
+      <div class="card">
+        <h3>라운드별 마릿수 증가</h3>
+        <ul>
+          <li>현재(<code class="field">runPlan.ts</code>): 1R 3~4 / 2R 4~5 / 3R 3~4+엘리트1</li>
+          <li>제안: 1R 5~6 / 2R 7~8 / 3R 6~7+엘리트1</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>이동속도 전반 상향</h3>
+        <ul>
+          <li>제안: 전 유형 속도 ×1.15(예: 일반 70→80, 탱크 40→46, 스피드 150→172)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>🧨 폭탄돌리기(자폭몹) — 신규 유형</h3>
+        <ul>
+          <li>빠르게 직진 추적(속도 110), 플레이어 반경 40px 이내 접근 시 <strong>예열 후 폭발</strong>(짧게 깜빡이다 터짐) — 광역 데미지를 입히고 자기 자신도 소멸</li>
+          <li>총에 맞아 죽으면(폭발 전 사망) 그냥 죽는다 — 폭발 없음(단순화, 아래 열린 질문 참고)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>아이템 드랍률 감소</h3>
+        <ul>
+          <li>현재(<code class="field">rewards.ts</code>): 라운드별 <code class="field">itemChance</code> 0.6/0.7/0.9, 3라운드 <code class="field">bonusChance</code> 0.35</li>
+          <li>제안: 전부 ×0.7 (0.42/0.49/0.63, 보너스 0.25) — 재화량은 그대로, 아이템만 희석</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 style="margin-top:28px">3. 멀티샷 조준 버그 <span class="badge done">확정 — 버그 수정</span></h3>
+    <p class="lede">원인 확인됨: <code class="field">computeFiringAngles()</code>가 총알
+    개수가 짝수일 때 부채꼴을 정확히 좌우 대칭으로 벌려서, <strong>정중앙(실제 조준각)에는
+    총알이 하나도 없다</strong> — 2발일 때 -7.5°/+7.5°뿐이라 가운데 있는 타겟은 둘 다 빗나간다.
+    3발일 때는 우연히 가운데(0°)가 포함돼서 문제가 없었다.</p>
+    <p class="lede"><strong>수정 방식(확정)</strong>: 총알 개수와 무관하게 항상 정확한
+    조준각(0°) 총알을 하나 포함시키고, 나머지 총알을 좌→우→좌→우 순서로 하나씩
+    덧붙인다 — 홀수 개일 땐 지금처럼 대칭 부채꼴이 되고, 짝수 개일 땐 가운데 하나 +
+    한쪽으로 치우친 나머지가 된다. 시각적 대칭성보다 "가운데 타겟은 항상 맞는다"는
+    기능적 정확성을 우선했다.</p>
+
+    <h3 style="margin-top:28px">4. 플레이어 신규 공격 패턴(지뢰·자동포탑·투척) <span class="badge">제안 — 규모 큼</span></h3>
+    <p class="lede">기존 발사 패턴계(고무줄 연사·쌍딱총·비석치기)는 전부 "메인 총알
+    발사" 파이프라인 하나를 건드리는 수준이었다. 이번 3개는 성격이 달라서 —
+    각각 <strong>자기만의 쿨다운·투사체·업데이트 루프를 새로 갖는 하위 시스템</strong>이다.
+    사실상 업그레이드 시스템 한 판 더 만드는 규모라고 보는 게 맞다.</p>
+    <div class="grid">
+      <div class="card">
+        <p class="name">💣 부비트랩(지뢰)</p>
+        <ul>
+          <li>일정 주기(예: 4초)마다 플레이어 발밑에 자동 설치, 적이 밟으면 폭발</li>
+          <li>설치 개수 상한 필요(동시에 너무 많이 깔리지 않게) — 예: 최대 3개, 초과 시 가장 오래된 것부터 소멸</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="name">🏹 자동 딱총(보조 포탑)</p>
+        <ul>
+          <li>메인 총과 별개로, 자기 쿨다운으로 가장 가까운 적에게 자동 발사(플레이어 조작 무관)</li>
+          <li>메인 총보다 약하게(예: 데미지 50%, 쿨다운 2배) — 보조 화력이지 대체가 아님</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="name">🎯 폭탄 던지기(투척)</p>
+        <ul>
+          <li>포물선으로 날아가 착지 지점에서 지연 폭발(광역) — 다수의 적을 상대로 유리</li>
+          <li>자동 발사면 좋을지, 별도 키(예: Space)로 플레이어가 직접 던지게 할지는 열린 질문</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 style="margin-top:28px">5. 카메라 추적 + 월드 확장 <span class="badge">제안</span></h3>
+    <p class="lede">현재 <code class="field">CANVAS_W/H</code>(960×540)가 화면 크기이자
+    월드 크기 그 자체다 — 그래서 좁게 느껴진다. 화면(뷰포트)은 그대로 두고,
+    <strong>월드만 키워서 카메라가 플레이어를 따라다니게</strong> 하는 안을 제안한다.</p>
+    <div class="grid">
+      <div class="card">
+        <h3>제안 수치</h3>
+        <ul>
+          <li>월드 2400×1350(뷰포트의 2.5배), 뷰포트(960×540)는 그대로</li>
+          <li><code class="field">this.cameras.main.setBounds(...)</code> + <code class="field">startFollow(this.player, true, 0.1, 0.1)</code></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>같이 손봐야 하는 것</h3>
+        <ul>
+          <li><code class="field">maps.ts</code>의 4개 레이아웃 좌표가 전부 960×540 기준 — 월드가 커지면 좌표 재설계 필요(그냥 늘리면 엄폐물이 화면 구석에만 몰림)</li>
+          <li>적 가장자리 스폰(<code class="field">randomEdgePoint</code>)은 월드 크기 상수만 바꾸면 자동으로 대응됨</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 style="margin-top:28px">6. 업그레이드 캡슐 라벨 표시 <span class="badge done">확정 — UI 수정</span></h3>
+    <p class="lede">지금은 캡슐에 <code class="field">"?"</code>만 표시하고 열어야 정체가
+    드러나는 가챠 연출이었는데, 3장 다 무작위로 안 보이니 선택이 아니라 뽑기처럼
+    느껴진다는 피드백. <strong>확정: 캡슐 위에 업그레이드 이름을 바로 표시</strong>해서
+    실제로 "골라서" 여는 방식으로 바꾼다 — 데이터는 이미 있다(<code class="field">UpgradeCard.name</code>),
+    <code class="field">UpgradeChoiceScene.buildCapsule()</code>의 <code class="field">"?"</code>
+    텍스트를 <code class="field">card.name</code>으로 바꾸기만 하면 된다.</p>
+
+    <h3 style="margin-top:28px">7. 마을 영구 업그레이드 상한·비용 재조정 <span class="badge">제안</span></h3>
+    <p class="lede">현재(<code class="field">catalog.ts</code>): 탄환 위력·탄창 용량 둘 다
+    <code class="field">maxLevel: 5</code>, <code class="field">baseCost</code> 20/25,
+    <code class="field">costGrowth: 1.6</code>. 5레벨까지 총 비용은 대략 316(탄환)/395(탄창) —
+    한두 번의 좋은 런으로 금방 다 채워진다.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th class="mono">현재</th><th class="mono">제안</th></tr></thead>
+        <tbody>
+          <tr><td>최대 레벨</td><td class="mono">5</td><td class="mono">10</td></tr>
+          <tr><td>성장률(costGrowth)</td><td class="mono">1.6</td><td class="mono">1.75</td></tr>
+          <tr><td>최종 레벨까지 총 비용(탄환 기준)</td><td class="mono">약 316</td><td class="mono">약 8,150</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <p class="eyebrow">열린 질문 — 목표 플레이 시간</p>
+      <p>평균 클리어 런 하나당 재화 획득량이 대략 55(현재 <code class="field">rewards.ts</code>
+      기준) — 위 제안(총 8,150)이면 순수 계산상 150런 가까이 필요해진다. 이게 의도한
+      "오래 걸림"의 강도에 맞는지, 아니면 총 500~1,000 정도(런 10~20개 분량)로
+      완화할지 — 목표로 하는 "여기까지 도달하려면 대략 이 정도는 플레이해야 한다"는
+      감각을 알려주면 정확히 역산해서 넣겠다.</p>
+    </div>
+
+    <div class="callout">
+      <p class="eyebrow">열린 질문 — 첨삭 포인트</p>
+      <ul>
+        <li><strong>몹 원거리 공격 도입 범위</strong> — 5개 유형 전부 한 번에 붙일지, 엘리트만 먼저 붙여서 검증한 뒤 확장할지</li>
+        <li><strong>자폭몹, 총에 맞아 죽을 때도 폭발할지</strong> — 지금 제안은 "안 함"(단순함 우선). 넣으면 슈팅 자체로도 연쇄폭발을 노릴 수 있어 재밌어질 수 있지만 밸런스가 더 복잡해짐</li>
+        <li><strong>신규 공격 패턴 3개 다 한 번에 vs 하나씩</strong> — 규모가 커서(각각 새 하위 시스템) 순차 진행을 추천하지만, 어느 걸 먼저 할지(부비트랩/자동딱총/투척 중)</li>
+        <li><strong>투척 폭탄이 자동인지 수동(별도 키)인지</strong> — 자동이면 기존 업그레이드들과 일관되지만, 수동이면 조작 깊이가 늘어남</li>
+        <li><strong>월드 확장 배율</strong> — 2.5배가 적당한지, 더 크게/작게 할지 (너무 크면 적이 화면 밖에 오래 머물러 루즈해질 수 있음)</li>
+        <li><strong>마을 업그레이드 목표 플레이 시간</strong> — 위 표 참고, 구체적 런 수 감각이 필요</li>
+        <li><strong>신규 공격 패턴 이름</strong> — 부비트랩/자동 딱총/폭탄 던지기는 1차 초안, 다른 것들처럼 더 다듬어도 됨</li>
+      </ul>
     </div>
   </section>
 
