@@ -104,6 +104,11 @@ docs/blueprint.html   팀 내부 설계 문서
 
 최신 항목이 위로 온다.
 
+- **2026-09-05** — 플레이 피드백 기반 7개 요청(몹 원거리 공격, 몹 증가+자폭몹+
+  드랍률 감소, 멀티샷 조준 버그, 신규 공격 패턴 3종, 카메라 추적+월드 확장,
+  캡슐 라벨 표시, 마을 업그레이드 상한·비용 재조정)을 설계 문서로 정리 —
+  구현 전, 첨삭 대기. 멀티샷 버그는 원인 특정 및 수정 방식 확정, 캡슐 라벨은
+  UI만 고치면 되는 확정 사항으로 분리. ([docs/blueprint.html](./docs/blueprint.html#expansion2))
 - **2026-09-05** — 업그레이드 시스템 두 병렬 브랜치(`feature/combat-upgrades-core`,
   `feature/combat-elements`)를 `feature/combat`에 통합 완료 — 예상됐던
   `statusEffects.ts` placeholder→실구현 교체 충돌 1건만 발생, 나머지는 깔끔히
