@@ -24,6 +24,8 @@ const PALETTE = {
   speedOutline: 0xc4a62e,
   rollerBody: 0xb8bec2,
   rollerOutline: 0x8e9598,
+  bomberBody: 0xd6432c, // 위험을 바로 알아보게 붉은 계열(경고색)
+  bomberOutline: 0x8a2418,
 };
 
 function ensure(scene: Phaser.Scene, key: string, draw: (g: Phaser.GameObjects.Graphics) => void, size: number) {
@@ -156,5 +158,17 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
       g.strokeCircle(16, 16, 15);
     },
     32,
+  );
+
+  ensure(
+    scene,
+    "enemy-bomber",
+    (g) => {
+      g.fillStyle(PALETTE.bomberBody, 1);
+      g.fillCircle(13, 13, 12);
+      g.lineStyle(2, PALETTE.bomberOutline, 1);
+      g.strokeCircle(13, 13, 12);
+    },
+    26,
   );
 }

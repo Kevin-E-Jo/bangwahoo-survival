@@ -36,6 +36,18 @@ const ELITE_CONTACT_DAMAGE = 44; // 25 × 1.75
 // 항상 보장, onBulletHitEnemy 참고).
 const BASE_ARMOR = 2;
 
+// 이동속도 전반 상향(blueprint#expansion2 「이동속도 전반 상향」): 기존 4개
+// 유형 속도 ×1.15. 블루프린트 예시(일반 70→80, 탱크 40→46, 스피드 150→172)와
+// 정확히 맞추려고 Math.floor(base*1.15)로 계산한 값을 그대로 하드코딩한다
+// (예: 70*1.15=80.5 → 80).
+const BOMBER_SPEED = 110; // 신규 유형 — 기존 4종 상향 대상이 아니라 블루프린트 확정치를 그대로 사용
+
+// 🧨 폭탄돌리기 상태머신 상수 — updateBomber()/explodeBomber() 참고.
+const BOMBER_TRIGGER_RANGE = 40; // 이 거리 안으로 들어오면 예열 시작(블루프린트 확정치)
+const BOMBER_PRIME_MS = 450; // 예열(텔레그래프) 지속 시간 — "짧게 깜빡이다 터짐"
+const BOMBER_BLINK_MS = 90; // 예열 중 깜빡임 토글 주기
+const BOMBER_EXPLOSION_DAMAGE = 35; // 광역 폭발 데미지(자폭 리스크 보상 — 다른 접촉 데미지보다 높게 판단)
+
 /** 엘리트를 제외한 일반 몹 유형별 스탯. 어떤 유형이 몇 마리 나오는지는
  * game-logic/runPlan.ts(시드 기반, 서버·클라 공유)가 정하고, 여기서는 유형별
  * 수치·스프라이트만 관리한다. */
@@ -43,11 +55,24 @@ const ARCHETYPE_STATS: Record<
   EnemyArchetype,
   { hp: number; speed: number; contactDamage: number; spriteBase: string }
 > = {
-  normal: { hp: 30, speed: 70, contactDamage: 18, spriteBase: "enemy" },
-  tank: { hp: 90, speed: 40, contactDamage: 24, spriteBase: "enemy-tank" },
-  speedster: { hp: 15, speed: 150, contactDamage: 15, spriteBase: "enemy-speed" },
+  normal: { hp: 30, speed: 80, contactDamage: 18, spriteBase: "enemy" },
+  tank: { hp: 90, speed: 46, contactDamage: 24, spriteBase: "enemy-tank" },
+  speedster: { hp: 15, speed: 172, contactDamage: 15, spriteBase: "enemy-speed" },
   // speed는 "구르기" 돌진 중에만 쓰인다 — 평소엔 방패를 든 채 정지.
-  roller: { hp: 45, speed: 260, contactDamage: 27, spriteBase: "enemy-roller" },
+  roller: { hp: 45, speed: 299, contactDamage: 27, spriteBase: "enemy-roller" },
+  // 🧨 폭탄돌리기(신규, blueprint#expansion2) — 빠르게 직진 추적하다 플레이어
+  // 반경 40px 이내 접근 시 예열 후 자폭(광역 데미지 + 자기 자신 소멸). hp는
+  // 블루프린트에 수치가 없어 직접 판단: speedster(15)보다 약간 튼튼해 접근
+  // 중 총알 몇 발은 버티되, 위협도가 높은 만큼 여전히 쉽게 저지 가능한 값으로
+  // 20을 골랐다. contactDamage는 폭발 데미지와 동일하게 맞춰서, 예열 중
+  // 플레이어가 실수로 몸을 부딪혀 일반 접촉 판정(onPlayerHitEnemy)이 먼저
+  // 발동해도 결과가 폭발과 같아지도록 한다.
+  bomber: {
+    hp: 20,
+    speed: BOMBER_SPEED,
+    contactDamage: BOMBER_EXPLOSION_DAMAGE,
+    spriteBase: "enemy-bomber",
+  },
 };
 
 const ROLLER_GUARD_MS = 900; // 방패를 든 채 정지해있는 시간
@@ -473,6 +498,10 @@ export class DungeonScene extends Phaser.Scene {
         this.updateRoller(enemy, time);
         continue;
       }
+      if (archetype === "bomber") {
+        this.updateBomber(enemy, time);
+        continue;
+      }
       this.homeTowardPlayer(enemy, ARCHETYPE_STATS[archetype].speed, time);
     }
   }
@@ -513,6 +542,49 @@ export class DungeonScene extends Phaser.Scene {
       enemy.setVelocity(0, 0);
       enemy.setAngle(0);
     }
+  }
+
+  /** 🧨 폭탄돌리기(자폭몹)의 움직임: 평소엔 빠르게 직진 추적하다가, 플레이어
+   * 반경 BOMBER_TRIGGER_RANGE 이내로 들어오면 그 자리에 멈춰 서서 짧게
+   * 깜빡이는 예열(텔레그래프)에 들어가고, 예열이 끝나면 폭발한다. 예열 중
+   * 총알에 맞아 죽으면(onBulletHitEnemy → killEnemy) "dying" 플래그가 서서
+   * updateEnemyHoming 진입부에서 걸러지므로 이 함수 자체가 더 이상 호출되지
+   * 않는다 — 즉 폭발 없이 그냥 죽는 경로는 별도 분기 없이 자연히 보장된다. */
+  private updateBomber(enemy: Phaser.Physics.Arcade.Sprite, time: number) {
+    const state = (enemy.getData("bomberState") as "chasing" | "priming" | undefined) ?? "chasing";
+
+    if (state === "priming") {
+      const stateAt = (enemy.getData("bomberStateAt") as number | undefined) ?? time;
+      // 깜빡임 텔레그래프 — updateWalkFrame과 같은 "시간 기반 토글" 방식이라
+      // 별도 tween을 만들고 정리(destroy 시 kill 등)할 필요가 없다.
+      const blinkOn = Math.floor((time - stateAt) / BOMBER_BLINK_MS) % 2 === 0;
+      enemy.setTintFill(blinkOn ? 0xff3b30 : 0xffffff);
+      if (time - stateAt >= BOMBER_PRIME_MS) {
+        this.explodeBomber(enemy);
+      }
+      return;
+    }
+
+    const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+    if (dist <= BOMBER_TRIGGER_RANGE) {
+      enemy.setData("bomberState", "priming");
+      enemy.setData("bomberStateAt", time);
+      enemy.setVelocity(0, 0);
+      return;
+    }
+    this.homeTowardPlayer(enemy, BOMBER_SPEED, time);
+  }
+
+  /** 예열이 끝났을 때 실제 폭발 처리 — 그 순간에도 플레이어가 폭발 반경
+   * 안에 있어야 데미지가 들어간다(예열 중 플레이어가 도망치면 피해를 회피할
+   * 수 있다는 뜻 — 다른 텔레그래프 공격들과 동일한 "피할 시간을 준다" 원칙). */
+  private explodeBomber(enemy: Phaser.Physics.Arcade.Sprite) {
+    if (enemy.getData("dying")) return;
+    const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+    if (dist <= BOMBER_TRIGGER_RANGE) {
+      this.damagePlayer(BOMBER_EXPLOSION_DAMAGE);
+    }
+    this.killEnemy(enemy);
   }
 
   private cleanupOffscreenBullets() {
@@ -627,20 +699,29 @@ export class DungeonScene extends Phaser.Scene {
 
   private onPlayerHitEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
     if (this.ended || !enemy.active || enemy.getData("dying")) return;
+    const contactDamage = enemy.getData("contactDamage") as number;
+    // 접촉 무적 시간 중이면 데미지가 안 들어가고(damagePlayer가 false 반환),
+    // 이 경우 적도 죽이지 않는다 — 무적이 끝난 뒤 다시 부딪혀야 판정되게
+    // 기존 동작을 그대로 유지(damagePlayer로 추출하기 전부터의 동작).
+    if (this.damagePlayer(contactDamage)) this.killEnemy(enemy);
+  }
+
+  /** 플레이어 피격 공통 처리 — 접촉 데미지(onPlayerHitEnemy)와 폭탄돌리기
+   * 자폭 데미지(explodeBomber)가 함께 쓴다. 접촉 무적 시간(lastHitAt) 안이면
+   * 데미지를 주지 않고 false를 반환한다(호출부가 그에 맞춰 후속 처리를
+   * 건너뛸 수 있도록). */
+  private damagePlayer(amount: number): boolean {
+    if (this.ended) return false;
     const now = this.time.now;
-    if (now - this.lastHitAt < CONTACT_INVULN_MS) return;
+    if (now - this.lastHitAt < CONTACT_INVULN_MS) return false;
     this.lastHitAt = now;
 
-    const contactDamage = enemy.getData("contactDamage") as number;
-    this.hp = Math.max(0, this.hp - contactDamage);
+    this.hp = Math.max(0, this.hp - amount);
     EventBus.emit(CombatEvents.HpChanged, { current: this.hp, max: PLAYER_MAX_HP });
     this.flashHit(this.player);
-    this.killEnemy(enemy);
 
-    if (this.hp <= 0) {
-      this.endRun("died");
-      return;
-    }
+    if (this.hp <= 0) this.endRun("died");
+    return true;
   }
 
   /** 짧게 틴트 플래시 후 원래대로 — 총알/접촉 피격 둘 다 재사용. 기본은
@@ -708,6 +789,10 @@ export class DungeonScene extends Phaser.Scene {
           if (spawn.archetype === "roller") {
             enemy.setData("rollState", "guard");
             enemy.setData("rollStateAt", this.time.now);
+          }
+          if (spawn.archetype === "bomber") {
+            enemy.setData("bomberState", "chasing");
+            enemy.setData("bomberStateAt", this.time.now);
           }
         }
       });

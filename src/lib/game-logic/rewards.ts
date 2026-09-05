@@ -15,14 +15,17 @@ interface RoundRewardRule {
 const COMMON_UNCOMMON = [...itemsByTier("common"), ...itemsByTier("uncommon")];
 const RARE_LEGEND = [...itemsByTier("rare"), ...itemsByTier("legend")];
 
+// 아이템 드랍률 감소(blueprint#expansion2 「아이템 드랍률 감소」): 재화량은
+// 그대로 두고 itemChance/bonusChance만 전부 ×0.7 — 0.6/0.7/0.9 → 0.42/0.49/0.63,
+// bonusChance 0.35 → 0.245.
 const ROUND_REWARD_RULES: readonly RoundRewardRule[] = [
-  { currency: [8, 15], itemChance: 0.6, possibleItems: COMMON_UNCOMMON },
-  { currency: [12, 20], itemChance: 0.7, possibleItems: COMMON_UNCOMMON },
+  { currency: [8, 15], itemChance: 0.6 * 0.7, possibleItems: COMMON_UNCOMMON },
+  { currency: [12, 20], itemChance: 0.7 * 0.7, possibleItems: COMMON_UNCOMMON },
   {
     currency: [20, 35],
-    itemChance: 0.9,
+    itemChance: 0.9 * 0.7,
     possibleItems: COMMON_UNCOMMON,
-    bonusChance: 0.35,
+    bonusChance: 0.35 * 0.7,
     bonusItems: RARE_LEGEND,
   },
 ];
