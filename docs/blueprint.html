@@ -168,6 +168,7 @@
     <a href="#gameplay">게임플레이</a>
     <a href="#upgrades">업그레이드 시스템</a>
     <a href="#expansion2">전투 다양화·월드 확장</a>
+    <a href="#stages">스테이지 셀렉트</a>
     <a href="#stack">기술 스택</a>
     <a href="#security">인증·보안</a>
     <a href="#data">데이터 모델</a>
@@ -726,6 +727,100 @@
         <li><strong>월드 확장 배율</strong> — 2.5배가 적당한지, 더 크게/작게 할지 (너무 크면 적이 화면 밖에 오래 머물러 루즈해질 수 있음)</li>
         <li><strong>마을 업그레이드 목표 플레이 시간</strong> — 위 표 참고, 구체적 런 수 감각이 필요</li>
         <li><strong>신규 공격 패턴 이름</strong> — 부비트랩/자동 딱총/폭탄 던지기는 1차 초안, 다른 것들처럼 더 다듬어도 됨</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="stages">
+    <p class="eyebrow">Design draft · not yet implemented · biggest architecture change so far</p>
+    <h2>스테이지 셀렉트 시스템 — "1-1 ~ 1-10, 2-1 ~ 2-10..." (설계 초안)</h2>
+    <p class="lede">가능하다 — 그리고 이 프로젝트에서 지금까지 한 것 중 가장 큰
+    구조 변경이다. 지금은 "런 하나 = 시드로 랜덤 결정된 3라운드"인데, 스테이지
+    셀렉트는 그 자리에 "챕터-스테이지 번호로 고정된, 맵·몹·난이도가 정해진
+    레벨"을 넣는 것이다. <strong>구현 전 — 첨삭 대기.</strong> 다른 대기 중인
+    설계 초안(<a href="#expansion2">전투 다양화·월드 확장</a>)과 어떤 순서로
+    할지도 열린 질문 중 하나로 남겨뒀다.</p>
+
+    <div class="callout">
+      <p class="eyebrow">왜 이게 제일 큰 변경인가</p>
+      <p>지금까지의 확장(업그레이드 시스템, 몹 다양성 등)은 전부 <code class="field">feature/combat</code>
+      한 영역 안에서 끝났다. 스테이지 셀렉트는 <strong>세 영역 전부</strong>를
+      건드린다 — 어떤 스테이지까지 깼는지 저장할 DB 컬럼(auth-backend),
+      스테이지를 고르는 화면(town-scene), 스테이지별로 다른 맵·몹·난이도를
+      실제로 트는 로직(combat). 지난번 업그레이드 시스템처럼 "combat 안에서
+      worktree 2개"가 아니라, <strong>원래 3개 병렬 세션 구조 그대로</strong>
+      쓰기에 맞는 첫 확장이다.</p>
+    </div>
+
+    <h3 style="margin-top:28px">메타 구조 (제안)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>개념</th><th>제안</th></tr></thead>
+        <tbody>
+          <tr><td>스테이지 ID</td><td class="mono">"챕터-스테이지" 문자열(예: "1-1", "2-7") — 챕터당 10스테이지</td></tr>
+          <tr><td>총 챕터 수</td><td class="mono">우선 2챕터(20스테이지)로 시작 — 이후 챕터 추가는 데이터만 늘리면 되는 구조로 설계(무한 절차생성 챕터는 스코프 밖)</td></tr>
+          <tr><td>잠금 해제</td><td class="mono">선형 — 1-1부터 순서대로 클리어해야 다음이 열림. 클리어한 스테이지는 파밍용으로 자유 재도전 가능</td></tr>
+          <tr><td>스테이지 하나의 길이</td><td class="mono">2라운드(현재 3라운드보다 짧게) — 스테이지가 10개나 되니 하나당 너무 길면 챕터 전체가 늘어짐</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:28px">맵·몹 배정 (제안)</h3>
+    <div class="grid">
+      <div class="card">
+        <h3>맵</h3>
+        <ul>
+          <li>기존 4개 레이아웃(빈 마당/상자더미/골목길/놀이터소품)을 스테이지 번호에 <strong>고정 순환 배정</strong>
+          (예: <code class="field">(스테이지 - 1) % 4</code>) — "이 스테이지는 항상 이 맵"이라는 정체성이 생김</li>
+          <li>지금처럼 시드로 매번 랜덤이면 스테이지 번호 자체의 의미가 옅어짐 — 스테이지 시스템 취지에 맞게 맵은 고정, 몹 배치·보상 굴림에만 시드를 계속 씀</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>몹·난이도</h3>
+        <ul>
+          <li>전역 스테이지 인덱스(<code class="field">(챕터-1)*10 + 스테이지</code>)가 커질수록 마릿수·체력·공격력이
+          완만하게 계단식 상승하는 난이도 곡선 함수 하나로 관리</li>
+          <li>챕터가 바뀌는 지점(예: 2-1)에서 한 단계 더 크게 상승 — "챕터가 바뀌었다"는 체감을 준다</li>
+          <li><a href="#expansion2">전투 다양화</a> 초안의 몹 원거리 공격·자폭몹도 스테이지 번호에 따라 점진적으로 등장(예: 1-1~1-3은 기존 유형만, 1-4부터 자폭몹 등장, 2장부턴 전원 원거리 공격 보유)</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 style="margin-top:28px">영역별 작업 (제안 — 병렬 분배안)</h3>
+    <div class="grid">
+      <div class="card layer-next">
+        <span class="badge next">auth-backend</span>
+        <ul>
+          <li><code class="field">TownProgress</code>에 <code class="field">highestStageCleared Int @default(0)</code>(또는 챕터·스테이지 분리 필드) 추가 — Prisma 마이그레이션 필요</li>
+          <li><code class="field">POST /api/run/start</code>가 <code class="field">stageId</code>를 받아 그 스테이지 잠금 여부 서버에서 검증 후 seed 발급</li>
+          <li><code class="field">POST /api/run/submit</code>도 <code class="field">stageId</code>를 같이 받아 그 스테이지 기준 재계산 — 서버 재검증 원칙(<a href="#interface">「시드 &amp; 검증 로직 공유」</a>)은 그대로 유지, 검증 기준만 "라운드 인덱스"에서 "스테이지+라운드"로 확장</li>
+        </ul>
+      </div>
+      <div class="card layer-next">
+        <span class="badge next">town-scene</span>
+        <ul>
+          <li>스테이지 선택 화면 신설 — 챕터별 그리드(1-1~1-10, 2-1~2-10...), 클리어/잠김/현재 상태 표시</li>
+          <li>"런 시작" 버튼이 스테이지 미선택 상태로 있던 기존 흐름을 대체(또는 그 앞에 스테이지 선택 단계 하나 추가)</li>
+        </ul>
+      </div>
+      <div class="card layer-phaser">
+        <span class="badge phaser">combat</span>
+        <ul>
+          <li><code class="field">game-logic/</code>에 스테이지 난이도 곡선 모듈 신설(스테이지 인덱스 → 맵 인덱스·몹 스탯 배율·라운드 수를 결정하는 순수 함수) — 기존 <code class="field">runPlan.ts</code>/<code class="field">maps.ts</code>를 시드 전용에서 "시드 + 스테이지" 기반으로 확장</li>
+          <li><code class="field">DungeonScene</code>이 seed 대신(또는 seed와 함께) stageId를 받아 위 모듈로 라운드·맵·몹 구성을 결정</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p class="eyebrow">열린 질문 — 첨삭 포인트</p>
+      <ul>
+        <li><strong>스테이지당 라운드 수</strong> — 2라운드 제안. 1라운드(더 짧고 가벼움) 또는 기존처럼 3라운드(스테이지 하나의 무게감은 커지지만 챕터 전체가 길어짐) 중 어느 쪽이 원하는 템포에 가까운지</li>
+        <li><strong>총 챕터 수와 확장 방식</strong> — 처음부터 몇 챕터를 만들어둘지, 나중에 챕터를 계속 추가하는 구조로만 짜둘지</li>
+        <li><strong>맵 고정 배정 vs 시드 랜덤 유지</strong> — 위 제안(고정 순환)이 기본안, 매번 다른 맛을 원하면 시드 랜덤을 유지하고 "스테이지"는 난이도·몹 구성에만 영향을 주는 절충안도 가능</li>
+        <li><strong>재도전 시 보상</strong> — 이미 깬 스테이지를 다시 플레이할 때도 매번 재화·아이템을 온전히 주는지, 파밍 남용 방지를 위해 절반만 주는지 등</li>
+        <li><strong>기존 "런" 개념과의 관계</strong> — 마을 ↔ 던전 순환이라는 기존 루프 자체는 유지하되, 이제 "던전 진입" 전에 "어느 스테이지?"를 고르는 단계가 추가되는 구조로 이해하면 맞는지</li>
+        <li><strong>진행 순서</strong> — 지금 대기 중인 <a href="#expansion2">전투 다양화·월드 확장</a> 초안과 이 스테이지 셀렉트 중 어느 걸 먼저 구현할지(스테이지 시스템이 나중에 들어오면 전투 다양화 쪽 몹 난이도 수치를 스테이지별로 다시 나눠야 해서, 순서에 따라 작업량이 달라짐)</li>
       </ul>
     </div>
   </section>
