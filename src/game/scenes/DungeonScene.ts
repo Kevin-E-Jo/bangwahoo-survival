@@ -13,6 +13,7 @@ import { EventBus } from "../EventBus";
 import { CombatEvents, type RunEndedPayload, type UpgradeChosenPayload } from "../events";
 import { pickMapLayout, type ObstacleType } from "../maps";
 import { applyElementalOnHit, tickStatusEffects } from "../statusEffects";
+import { AttackPatternsController } from "../newAttackPatterns";
 
 const OBSTACLE_TEXTURE: Record<ObstacleType, string> = {
   box: "obstacle_box",
@@ -138,6 +139,9 @@ export class DungeonScene extends Phaser.Scene {
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
   private obstacles!: Phaser.Physics.Arcade.StaticGroup;
+  // 부비트랩·자동 딱총·폭탄 던지기(신규 공격 패턴 3종) 전담 컨트롤러 —
+  // 실제 로직은 newAttackPatterns.ts 소관, DungeonScene은 생성 + tick() 호출만.
+  private attackPatterns!: AttackPatternsController;
 
   private hp = PLAYER_MAX_HP;
   // ammoMaxBase는 마을 상점(town shop) 영구 업그레이드까지만 반영한 값이고,
@@ -230,6 +234,20 @@ export class DungeonScene extends Phaser.Scene {
       this.onPlayerHitEnemy(enemyObj as Phaser.Physics.Arcade.Sprite);
     });
 
+    this.attackPatterns = new AttackPatternsController({
+      scene: this,
+      getPlayer: () => this.player,
+      getEnemies: () => this.enemies,
+      getBullets: () => this.bullets,
+      isEnded: () => this.ended,
+      stacksOf: (id) => this.stacksOf(id),
+      effectiveBulletDamage: () => this.effectiveBulletDamage(),
+      effectiveFireCooldownMs: () => this.effectiveFireCooldownMs(),
+      findNearestEnemy: () => this.findNearestEnemy(),
+      applyAoeDamage: (x, y, radius, rawDamage) => this.applyAoeDamage(x, y, radius, rawDamage),
+    });
+    this.attackPatterns.setup();
+
     const keyboard = this.input.keyboard;
     if (!keyboard) throw new Error("keyboard input unavailable");
     this.cursors = keyboard.createCursorKeys();
@@ -258,6 +276,7 @@ export class DungeonScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.startReload();
     this.updateAutoAim(time);
     this.updateEnemyHoming();
+    this.attackPatterns.tick(time);
 
     // NOTE(merge): 속성탄 상태이상 틱 처리. 병렬 브랜치가 statusEffects.ts를
     // 실제 구현으로 교체할 때 이 한 줄과 import만 바뀌면 된다 — 위아래 줄은
@@ -678,8 +697,11 @@ export class DungeonScene extends Phaser.Scene {
       return;
     }
 
+    // 자동 딱총(turret) 총알은 별도 데미지(메인 총의 50%)를 데이터로 심어서
+    // 넘어온다 — 그 외엔 메인 총알과 완전히 같은 피격 파이프라인을 그대로 탄다.
+    const overrideDamage = bullet.getData("damageOverride") as number | undefined;
     // 기본 방어력(전체 몹 공통) — 총알 데미지에서 고정 경감, 최소 1 데미지는 항상 보장.
-    const dmg = Math.max(1, Math.round(this.effectiveBulletDamage()) - BASE_ARMOR);
+    const dmg = Math.max(1, Math.round(overrideDamage ?? this.effectiveBulletDamage()) - BASE_ARMOR);
     const hp = (enemy.getData("hp") as number) - dmg;
     enemy.setData("hp", hp);
 
@@ -706,6 +728,36 @@ export class DungeonScene extends Phaser.Scene {
       const element = id.slice("elem_".length) as ElementKey;
       applyElementalOnHit(enemy, element, stacks, hitDamage, ctx);
     });
+  }
+
+  /** 부비트랩·폭탄 던지기(newAttackPatterns.ts)가 쓰는 광역 데미지 진입점.
+   * onBulletHitEnemy와 같은 규칙(방어력 경감·최소 1뎀 보장·롤러형 방패 차단·
+   * 속성탄 적용·사망 연출)을 그대로 따른다 — 총알이 아니라 폭발이라는
+   * 점만 다르고 "명중 처리"의 본질은 같다고 보고 파이프라인을 공유한다. */
+  private applyAoeDamage(x: number, y: number, radius: number, rawDamage: number) {
+    const dmg = Math.max(1, Math.round(rawDamage) - BASE_ARMOR);
+    for (const enemyObj of this.enemies.getChildren()) {
+      const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
+      if (!enemy.active || enemy.getData("dying")) continue;
+      const dist = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
+      if (dist > radius) continue;
+
+      const archetype = enemy.getData("archetype") as EnemyArchetype | undefined;
+      if (archetype === "roller" && enemy.getData("rollState") !== "rolling") {
+        this.flashHit(enemy, 0xffe066);
+        continue;
+      }
+
+      const hp = (enemy.getData("hp") as number) - dmg;
+      enemy.setData("hp", hp);
+      this.applyElementalHits(enemy, dmg);
+
+      if (hp <= 0) {
+        this.killEnemy(enemy);
+      } else {
+        this.flashHit(enemy);
+      }
+    }
   }
 
   private onPlayerHitEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
