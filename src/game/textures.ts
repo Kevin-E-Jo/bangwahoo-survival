@@ -24,6 +24,12 @@ const PALETTE = {
   speedOutline: 0xc4a62e,
   rollerBody: 0xb8bec2,
   rollerOutline: 0x8e9598,
+  projDdakji: 0xd4537e,
+  projStone: 0x9c9689,
+  projSling: 0xc4694a,
+  projBook: 0xf7f3e6,
+  bomberBody: 0xd6432c, // 위험을 바로 알아보게 붉은 계열(경고색)
+  bomberOutline: 0x8a2418,
 };
 
 function ensure(scene: Phaser.Scene, key: string, draw: (g: Phaser.GameObjects.Graphics) => void, size: number) {
@@ -79,6 +85,82 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
     "bullet",
     (g) => {
       g.fillStyle(PALETTE.bullet, 1);
+      g.fillCircle(4, 4, 4);
+    },
+    8,
+  );
+
+  // 몹 원거리 공격 투사체(docs/blueprint.html#expansion2 "1. 몹 원거리 공격") —
+  // enemy_proj_*.png 로드가 실패했을 때만 쓰이는 절차 생성 폴백.
+  ensure(
+    scene,
+    "enemy_proj_ddakji",
+    (g) => {
+      g.fillStyle(PALETTE.projDdakji, 1);
+      g.fillCircle(4, 4, 4);
+    },
+    8,
+  );
+
+  ensure(
+    scene,
+    "enemy_proj_stone",
+    (g) => {
+      g.fillStyle(PALETTE.projStone, 1);
+      g.fillCircle(4, 4, 4);
+    },
+    8,
+  );
+
+  ensure(
+    scene,
+    "enemy_proj_sling",
+    (g) => {
+      g.fillStyle(PALETTE.projSling, 1);
+      g.fillCircle(4, 4, 4);
+    },
+    8,
+  );
+
+  ensure(
+    scene,
+    "enemy_proj_book",
+    (g) => {
+      g.fillStyle(PALETTE.projBook, 1);
+      g.fillRect(2, 2, 12, 8);
+    },
+    16,
+  );
+
+  ensure(
+    scene,
+    "mine",
+    (g) => {
+      g.fillStyle(PALETTE.obstacle, 1);
+      g.fillCircle(10, 10, 9);
+      g.lineStyle(2, PALETTE.obstacleOutline, 1);
+      g.strokeCircle(10, 10, 9);
+      g.fillStyle(0xd4537e, 1);
+      g.fillCircle(10, 10, 3);
+    },
+    20,
+  );
+
+  ensure(
+    scene,
+    "bomb",
+    (g) => {
+      g.fillStyle(0x3a3a3a, 1);
+      g.fillCircle(10, 11, 7);
+    },
+    20,
+  );
+
+  ensure(
+    scene,
+    "turret_bullet",
+    (g) => {
+      g.fillStyle(PALETTE.pickup, 1);
       g.fillCircle(4, 4, 4);
     },
     8,
@@ -156,5 +238,17 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
       g.strokeCircle(16, 16, 15);
     },
     32,
+  );
+
+  ensure(
+    scene,
+    "enemy-bomber",
+    (g) => {
+      g.fillStyle(PALETTE.bomberBody, 1);
+      g.fillCircle(13, 13, 12);
+      g.lineStyle(2, PALETTE.bomberOutline, 1);
+      g.strokeCircle(13, 13, 12);
+    },
+    26,
   );
 }

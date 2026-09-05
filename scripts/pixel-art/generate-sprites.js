@@ -317,6 +317,90 @@ function drawKid(g, o, { hair, hairShade, skin, skinShade, shirt, shirtShade, co
   write("bullet", g);
 }
 
+// ── 몹 원거리 공격 투사체(docs/blueprint.html#expansion2 "1. 몹 원거리 공격")
+// 유형별로 다른 투사체 — 플레이어 bullet과 구분되는 색·모양으로 "적 탄"임을
+// 즉시 읽히게 한다. 전부 write()로 2배 확대(작은 투사체라 확대해야 보임).
+
+// 일반형 — 딱지(작은 접힌 종이, toy_ddakji 드롭 아이콘과 같은 배색·대각선 분할)
+{
+  const cream = hex("#F7F3E6");
+  const red = hex("#D4537E");
+  const redShade = hex("#993556");
+  const g = makeGrid(6, 6);
+  fillRect(g, 0, 0, 5, 5, cream);
+  for (let y = 0; y <= 5; y++) for (let x = 0; x <= 5; x++) if (x - 0 >= y - 0) setPx(g, x, y, red);
+  fillRect(g, 0, 0, 5, 0, redShade);
+  write("enemy_proj_ddakji", g);
+}
+
+// 탱크형 — 돌멩이(둥글고 무거운 회색 돌)
+{
+  const stone = hex("#9C9689");
+  const stoneShade = hex("#736D62");
+  const g = makeGrid(6, 6);
+  fillEllipse(g, 2.5, 2.5, 2.6, 2.6, (x, y, dx, dy) => (dy > 0.2 ? stoneShade : stone));
+  write("enemy_proj_stone", g);
+}
+
+// 스피드형 — 고무줄 새총 탄(작고 빠른 고무 탄알)
+{
+  const pellet = hex("#C4694A");
+  const pelletHi = hex("#E98A66");
+  const g = makeGrid(4, 4);
+  fillEllipse(g, 1.8, 1.8, 1.7, 1.7, () => pellet);
+  setPx(g, 1, 1, pelletHi);
+  write("enemy_proj_sling", g);
+}
+
+// 엘리트 — 책장(날아가는 종이 낱장, 한쪽 모서리가 살짝 어둡게 접힌 느낌)
+{
+  const page = hex("#F7F3E6");
+  const pageShade = hex("#E0D9C0");
+  const fold = hex("#B9BCC0");
+  const g = makeGrid(8, 6);
+  fillRect(g, 0, 0, 7, 5, page);
+  fillRect(g, 0, 3, 7, 5, pageShade);
+  fillRect(g, 6, 0, 7, 5, fold);
+  write("enemy_proj_book", g);
+}
+
+// ── mine: 20x20 direct, 부비트랩 — 압력판 위 경고등(밟으면 터짐을 암시) ──
+{
+  const g = makeGrid(20, 20);
+  const plate = hex("#6C7478");
+  const plateShade = hex("#4E5458");
+  const rim = hex("#8E9598");
+  const light = hex("#D4537E");
+  fillEllipse(g, 10, 10, 8.5, 8.5, (x, y, dx, dy) => (dy > 0.4 ? plateShade : plate));
+  fillEllipse(g, 10, 10, 8.5, 8.5, (x, y, dx, dy) => (dx * dx + dy * dy > 0.82 ? rim : null));
+  fillEllipse(g, 10, 10, 3, 3, () => light);
+  writeDirect("mine", g);
+}
+
+// ── bomb: 20x20 direct, 폭탄 던지기 — 검은 구체 + 심지 ────────────────
+{
+  const g = makeGrid(20, 20);
+  const body = hex("#3A3A3A");
+  const bodyShade = hex("#282828");
+  const fuse = hex("#B98E36");
+  const spark = hex("#E0B85C");
+  fillEllipse(g, 10, 11, 7, 7, (x, y, dx, dy) => (dy > 0.4 ? bodyShade : body));
+  fillRect(g, 10, 2, 11, 5, fuse);
+  fillEllipse(g, 11, 2, 1.6, 1.6, () => spark);
+  writeDirect("bomb", g);
+}
+
+// ── turret_bullet: 4x4 → 8x8, 자동 딱총 전용 탄 — 메인 총알과 구분되는
+// 금색 BB탄(보조 화력임을 색으로도 구분) ─────────────────────────────
+{
+  const body = hex("#E0B85C");
+  const hiC = hex("#F7F3E6");
+  const g = makeGrid(4, 4);
+  fillEllipse(g, 1.8, 1.8, 1.7, 1.7, () => body);
+  setPx(g, 1, 1, hiC);
+  write("turret_bullet", g);
+}
+
 // ── pickup: 10x10 → 20x20, 무기 파츠(다이아몬드 컷) ─────────────────
 {
   const body = hex("#E0B85C");

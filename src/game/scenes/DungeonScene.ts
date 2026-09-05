@@ -2,13 +2,19 @@ import Phaser from "phaser/dist/phaser.js"; // 이유: EventBus.ts 상단 주석
 import {
   generateRunPlan,
   computeRunRewards,
+  pickUpgradeChoices,
   ROUND_COUNT,
   type RoundPlan,
   type EnemyArchetype,
+  type UpgradeId,
 } from "@/lib/game-logic";
+import type { ElementKey } from "@/lib/game-logic/upgradeTypes";
 import { EventBus } from "../EventBus";
-import { CombatEvents, type RunEndedPayload } from "../events";
+import { CombatEvents, type RunEndedPayload, type UpgradeChosenPayload } from "../events";
 import { pickMapLayout, type ObstacleType } from "../maps";
+import { applyElementalOnHit, tickStatusEffects } from "../statusEffects";
+import { onEnemyProjectileHitObstacle, onEnemyProjectileHitPlayer, tickEnemyRanged } from "../enemyRanged";
+import { AttackPatternsController } from "../newAttackPatterns";
 
 const OBSTACLE_TEXTURE: Record<ObstacleType, string> = {
   box: "obstacle_box",
@@ -19,13 +25,36 @@ const OBSTACLE_TEXTURE: Record<ObstacleType, string> = {
 export const CANVAS_W = 960;
 export const CANVAS_H = 540;
 
+// 월드(=물리 경계·카메라 스크롤 범위)는 뷰포트(CANVAS_W/H)의 2.5배(블루프린트
+// 「카메라 추적 + 월드 확장」). 뷰포트는 화면에 보이는 크기 그대로 유지하고,
+// 카메라가 플레이어를 따라다니며 이 월드 안을 스크롤한다.
+export const WORLD_W = 2400;
+export const WORLD_H = 1350;
+
 const PLAYER_SPEED = 220;
 const PLAYER_MAX_HP = 100;
 const CONTACT_INVULN_MS = 500;
 
 const ELITE_SPEED = 55;
-const ELITE_HP = 70;
-const ELITE_CONTACT_DAMAGE = 25;
+const ELITE_HP = 123; // 70 × 1.75 — 다른 몹(×1.5)보다 별도로 더 세게, 마무리 보스 체감용
+const ELITE_CONTACT_DAMAGE = 44; // 25 × 1.75
+
+// 업그레이드 시스템 도입에 맞춰 전체 난이도 상향(블루프린트 「몹 난이도 상향」
+// 참고) — 방어력은 신규 스탯, 총알 데미지에서 고정 경감한다(최소 1 데미지는
+// 항상 보장, onBulletHitEnemy 참고).
+const BASE_ARMOR = 2;
+
+// 이동속도 전반 상향(blueprint#expansion2 「이동속도 전반 상향」): 기존 4개
+// 유형 속도 ×1.15. 블루프린트 예시(일반 70→80, 탱크 40→46, 스피드 150→172)와
+// 정확히 맞추려고 Math.floor(base*1.15)로 계산한 값을 그대로 하드코딩한다
+// (예: 70*1.15=80.5 → 80).
+const BOMBER_SPEED = 110; // 신규 유형 — 기존 4종 상향 대상이 아니라 블루프린트 확정치를 그대로 사용
+
+// 🧨 폭탄돌리기 상태머신 상수 — updateBomber()/explodeBomber() 참고.
+const BOMBER_TRIGGER_RANGE = 40; // 이 거리 안으로 들어오면 예열 시작(블루프린트 확정치)
+const BOMBER_PRIME_MS = 450; // 예열(텔레그래프) 지속 시간 — "짧게 깜빡이다 터짐"
+const BOMBER_BLINK_MS = 90; // 예열 중 깜빡임 토글 주기
+const BOMBER_EXPLOSION_DAMAGE = 35; // 광역 폭발 데미지(자폭 리스크 보상 — 다른 접촉 데미지보다 높게 판단)
 
 /** 엘리트를 제외한 일반 몹 유형별 스탯. 어떤 유형이 몇 마리 나오는지는
  * game-logic/runPlan.ts(시드 기반, 서버·클라 공유)가 정하고, 여기서는 유형별
@@ -34,11 +63,24 @@ const ARCHETYPE_STATS: Record<
   EnemyArchetype,
   { hp: number; speed: number; contactDamage: number; spriteBase: string }
 > = {
-  normal: { hp: 20, speed: 70, contactDamage: 12, spriteBase: "enemy" },
-  tank: { hp: 60, speed: 40, contactDamage: 16, spriteBase: "enemy-tank" },
-  speedster: { hp: 10, speed: 150, contactDamage: 10, spriteBase: "enemy-speed" },
+  normal: { hp: 30, speed: 80, contactDamage: 18, spriteBase: "enemy" },
+  tank: { hp: 90, speed: 46, contactDamage: 24, spriteBase: "enemy-tank" },
+  speedster: { hp: 15, speed: 172, contactDamage: 15, spriteBase: "enemy-speed" },
   // speed는 "구르기" 돌진 중에만 쓰인다 — 평소엔 방패를 든 채 정지.
-  roller: { hp: 30, speed: 260, contactDamage: 18, spriteBase: "enemy-roller" },
+  roller: { hp: 45, speed: 299, contactDamage: 27, spriteBase: "enemy-roller" },
+  // 🧨 폭탄돌리기(신규, blueprint#expansion2) — 빠르게 직진 추적하다 플레이어
+  // 반경 40px 이내 접근 시 예열 후 자폭(광역 데미지 + 자기 자신 소멸). hp는
+  // 블루프린트에 수치가 없어 직접 판단: speedster(15)보다 약간 튼튼해 접근
+  // 중 총알 몇 발은 버티되, 위협도가 높은 만큼 여전히 쉽게 저지 가능한 값으로
+  // 20을 골랐다. contactDamage는 폭발 데미지와 동일하게 맞춰서, 예열 중
+  // 플레이어가 실수로 몸을 부딪혀 일반 접촉 판정(onPlayerHitEnemy)이 먼저
+  // 발동해도 결과가 폭발과 같아지도록 한다.
+  bomber: {
+    hp: 20,
+    speed: BOMBER_SPEED,
+    contactDamage: BOMBER_EXPLOSION_DAMAGE,
+    spriteBase: "enemy-bomber",
+  },
 };
 
 const ROLLER_GUARD_MS = 900; // 방패를 든 채 정지해있는 시간
@@ -51,6 +93,18 @@ const RELOAD_MS = 1100;
 const AUTO_TARGET_RANGE = 420; // 이 거리 안의 적만 자동 조준·발사한다
 const SPAWN_STAGGER_MS = 550;
 const SPAWN_MARGIN = 24; // 화면 가장자리 바로 밖에서 스폰
+
+// 업그레이드 시스템(블루프린트 「업그레이드 시스템」) — 런 한정 빌드 강화.
+// 스택당 배율/가산치는 문서에 확정된 수치를 그대로 옮긴 것.
+const MULTISHOT_SPREAD_DEG = 15;
+const DOUBLESHOT_DELAY_MS = 80;
+const DAMAGE_PCT_PER_STACK = 0.15;
+const FIRERATE_MULT_PER_STACK = 0.88; // -12%/스택
+const FIRERATE_FLOOR_MS = 60;
+const MOVESPEED_PCT_PER_STACK = 0.1;
+const AMMO_PER_STACK = 2;
+const RELOAD_MULT_PER_STACK = 0.85; // -15%/스택
+const RELOAD_FLOOR_MS = 400;
 
 const WALK_TOGGLE_MS = 150; // 이동 중 idle↔walk 프레임 전환 주기
 const HIT_TINT_MS = 90; // 피격 시 흰색 플래시 지속 시간
@@ -86,14 +140,28 @@ export class DungeonScene extends Phaser.Scene {
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
   private obstacles!: Phaser.Physics.Arcade.StaticGroup;
+  // 몹 원거리 공격 투사체(docs/blueprint.html#expansion2 "1. 몹 원거리 공격") —
+  // 실제 예열·발사 로직은 enemyRanged.ts 소관, 여기서는 그룹·충돌만 연결한다.
+  private enemyProjectiles!: Phaser.Physics.Arcade.Group;
+  // 부비트랩·자동 딱총·폭탄 던지기(신규 공격 패턴 3종) 전담 컨트롤러 —
+  // 실제 로직은 newAttackPatterns.ts 소관, DungeonScene은 생성 + tick() 호출만.
+  private attackPatterns!: AttackPatternsController;
 
   private hp = PLAYER_MAX_HP;
+  // ammoMaxBase는 마을 상점(town shop) 영구 업그레이드까지만 반영한 값이고,
+  // ammoMax는 여기에 런 한정 "문방구 사재기" 스택을 더한 실제 사용값이다.
+  private ammoMaxBase = 6;
   private ammoMax = 6;
   private ammo = 6;
   private reloading = false;
   private lastFiredAt = 0;
   private lastHitAt = -Infinity;
+  private lastProjectileHitAt = -Infinity; // 적 투사체 피격용 별도 무적시간(접촉 피격과 독립)
   private bulletDamage = 10;
+
+  // 런 한정 업그레이드 보유 현황(블루프린트 「업그레이드 시스템」) — 마을 상점의
+  // weaponDamage/weaponAmmo(영구)와는 완전히 별개이고, 런이 끝나면 사라진다.
+  private appliedUpgrades = new Map<UpgradeId, number>();
 
   private roundBusy = false; // 현재 라운드 스폰/진행 중 — 중복 진행 방지
   private cumulativeCurrency = 0;
@@ -110,9 +178,11 @@ export class DungeonScene extends Phaser.Scene {
     this.roundIndex = 0;
     this.ended = false;
     this.hp = PLAYER_MAX_HP;
-    this.ammoMax = 6 + data.upgrades.weaponAmmo * 2;
+    this.ammoMaxBase = 6 + data.upgrades.weaponAmmo * 2;
+    this.ammoMax = this.ammoMaxBase;
     this.ammo = this.ammoMax;
     this.bulletDamage = 10 + data.upgrades.weaponDamage * 4;
+    this.appliedUpgrades = new Map();
     this.cumulativeCurrency = 0;
     this.cumulativeItems = new Map();
   }
@@ -120,10 +190,10 @@ export class DungeonScene extends Phaser.Scene {
   create() {
     this.startedAtMs = this.time.now;
 
-    this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0xf2f3ec);
-    this.add.tileSprite(0, 0, CANVAS_W, CANVAS_H, "ground").setOrigin(0, 0);
+    this.add.rectangle(WORLD_W / 2, WORLD_H / 2, WORLD_W, WORLD_H, 0xf2f3ec);
+    this.add.tileSprite(0, 0, WORLD_W, WORLD_H, "ground").setOrigin(0, 0);
 
-    this.physics.world.setBounds(0, 0, CANVAS_W, CANVAS_H);
+    this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
 
     this.obstacles = this.physics.add.staticGroup();
     const mapLayout = pickMapLayout(this.seed);
@@ -131,24 +201,35 @@ export class DungeonScene extends Phaser.Scene {
       this.obstacles.create(o.x, o.y, OBSTACLE_TEXTURE[o.type]);
     }
 
-    this.player = this.physics.add.sprite(CANVAS_W / 2, CANVAS_H / 2, "player");
+    this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "player");
     this.player.setCollideWorldBounds(true);
     this.player.body?.setSize(20, 28);
     this.player.setData("baseKey", "player");
+
+    // 카메라 추적(블루프린트 「카메라 추적 + 월드 확장」) — 뷰포트는 그대로,
+    // 월드가 더 커진 만큼 카메라가 플레이어를 부드럽게 따라간다.
+    this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
     this.aimLine = this.add.graphics();
     this.muzzleFlash = this.add.circle(0, 0, 6, 0xffffff, 0.9).setVisible(false);
 
     this.bullets = this.physics.add.group({ allowGravity: false });
     this.enemies = this.physics.add.group({ allowGravity: false });
+    this.enemyProjectiles = this.physics.add.group({ allowGravity: false });
 
-    // 엄폐물은 이동과 총알을 둘 다 막는다 — 적에게 원거리 공격이 없어서, 이게
-    // "은폐/엄폐"가 실질적인 의미를 가지는 유일한 방식이다(플레이어가 사선을
-    // 끊어 추격을 따돌리거나, 자기 총알도 막힌다는 트레이드오프를 진다).
+    // 엄폐물은 이동과 총알을 둘 다 막는다 — 몹 원거리 공격도 동일 규칙(플레이어
+    // 총알과 대칭)으로 막혀야 "은폐/엄폐"가 양방향으로 의미를 가진다.
     this.physics.add.collider(this.player, this.obstacles);
     this.physics.add.collider(this.enemies, this.obstacles);
-    this.physics.add.collider(this.bullets, this.obstacles, (bulletObj) => {
-      (bulletObj as Phaser.Physics.Arcade.Image).destroy();
+    this.physics.add.collider(this.bullets, this.obstacles, (bulletObj, obstacleObj) => {
+      this.onBulletHitObstacle(
+        bulletObj as Phaser.Physics.Arcade.Image,
+        obstacleObj as Phaser.Physics.Arcade.Image,
+      );
+    });
+    this.physics.add.collider(this.enemyProjectiles, this.obstacles, (projObj) => {
+      onEnemyProjectileHitObstacle(projObj as Phaser.Physics.Arcade.Image);
     });
 
     this.physics.add.overlap(this.bullets, this.enemies, (bulletObj, enemyObj) => {
@@ -160,6 +241,25 @@ export class DungeonScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.enemies, (_p, enemyObj) => {
       this.onPlayerHitEnemy(enemyObj as Phaser.Physics.Arcade.Sprite);
     });
+    this.physics.add.overlap(this.enemyProjectiles, this.player, (projObj) => {
+      onEnemyProjectileHitPlayer(projObj as Phaser.Physics.Arcade.Image, (dmg) =>
+        this.applyEnemyProjectileDamage(dmg),
+      );
+    });
+
+    this.attackPatterns = new AttackPatternsController({
+      scene: this,
+      getPlayer: () => this.player,
+      getEnemies: () => this.enemies,
+      getBullets: () => this.bullets,
+      isEnded: () => this.ended,
+      stacksOf: (id) => this.stacksOf(id),
+      effectiveBulletDamage: () => this.effectiveBulletDamage(),
+      effectiveFireCooldownMs: () => this.effectiveFireCooldownMs(),
+      findNearestEnemy: () => this.findNearestEnemy(),
+      applyAoeDamage: (x, y, radius, rawDamage) => this.applyAoeDamage(x, y, radius, rawDamage),
+    });
+    this.attackPatterns.setup();
 
     const keyboard = this.input.keyboard;
     if (!keyboard) throw new Error("keyboard input unavailable");
@@ -178,7 +278,8 @@ export class DungeonScene extends Phaser.Scene {
       ammoMax: this.ammoMax,
     });
 
-    this.startRound(0);
+    // 런 시작 직후, 첫 라운드 스폰 전에 첫 업그레이드 선택(pickIndex 0)을 끼워 넣는다.
+    this.showUpgradeChoice(0, () => this.startRound(0));
   }
 
   update(time: number) {
@@ -188,8 +289,90 @@ export class DungeonScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.startReload();
     this.updateAutoAim(time);
     this.updateEnemyHoming();
+    this.attackPatterns.tick(time);
+
+    // 몹 원거리 공격(예열·발사) 진행 — updateEnemyHoming() 이후에 호출해야
+    // 예열 중 이동 정지가 추적 이동에 덮어써지지 않는다.
+    tickEnemyRanged({
+      player: this.player,
+      enemies: this.enemies,
+      projectiles: this.enemyProjectiles,
+      time,
+    });
+
+    // NOTE(merge): 속성탄 상태이상 틱 처리. 병렬 브랜치가 statusEffects.ts를
+    // 실제 구현으로 교체할 때 이 한 줄과 import만 바뀌면 된다 — 위아래 줄은
+    // 건드릴 필요 없음.
+    tickStatusEffects({ player: this.player, enemies: this.enemies, time });
+
     this.cleanupOffscreenBullets();
     this.cleanupEscapedEnemies();
+  }
+
+  // ── 업그레이드 선택(런당 3회: 시작 직후 / 1라운드 클리어 후 / 2라운드 클리어 후) ──
+
+  private stacksOf(id: UpgradeId): number {
+    return this.appliedUpgrades.get(id) ?? 0;
+  }
+
+  /** DungeonScene을 pause()하고 UpgradeChoiceScene을 병렬 launch, 선택 완료
+   * 이벤트를 받으면 스택을 갱신하고 resume() 후 onDone을 호출한다. 후보가
+   * 하나도 없으면(이론상 거의 불가능하지만 안전장치) 그냥 넘어간다. */
+  private showUpgradeChoice(pickIndex: number, onDone: () => void) {
+    const choices = pickUpgradeChoices(this.seed, pickIndex, this.appliedUpgrades);
+    if (choices.length === 0) {
+      onDone();
+      return;
+    }
+
+    this.scene.pause();
+    this.scene.launch("UpgradeChoiceScene", { choices });
+
+    const onChosen = (payload: UpgradeChosenPayload) => {
+      this.applyUpgrade(payload.upgradeId);
+      this.scene.resume();
+      onDone();
+    };
+    EventBus.once(CombatEvents.UpgradeChosen, onChosen);
+  }
+
+  private applyUpgrade(id: UpgradeId) {
+    const stacks = this.stacksOf(id) + 1;
+    this.appliedUpgrades.set(id, stacks);
+
+    // 탄창 용량은 즉시 반영해야(+2) 다음 발사부터 바로 체감되고, 이미 장전된
+    // 탄약도 같이 늘어나야 자연스럽다(재장전을 기다릴 필요 없음).
+    if (id === "ammo") {
+      const newMax = this.ammoMaxBase + AMMO_PER_STACK * stacks;
+      const delta = newMax - this.ammoMax;
+      this.ammoMax = newMax;
+      this.ammo = Math.min(this.ammoMax, this.ammo + delta);
+      EventBus.emit(CombatEvents.AmmoChanged, { current: this.ammo, max: this.ammoMax });
+    }
+  }
+
+  // ── 스탯 강화계 실효치(마을 영구 업그레이드 위에 런 한정 스택을 곱/가산) ──
+
+  private effectiveBulletDamage(): number {
+    return this.bulletDamage * (1 + DAMAGE_PCT_PER_STACK * this.stacksOf("damage"));
+  }
+
+  private effectiveFireCooldownMs(): number {
+    return Math.max(
+      FIRERATE_FLOOR_MS,
+      FIRE_COOLDOWN_MS * Math.pow(FIRERATE_MULT_PER_STACK, this.stacksOf("firerate")),
+    );
+  }
+
+  private effectivePlayerSpeed(): number {
+    return PLAYER_SPEED * (1 + MOVESPEED_PCT_PER_STACK * this.stacksOf("movespeed"));
+  }
+
+  private effectiveReloadMs(): number {
+    return Math.max(
+      RELOAD_FLOOR_MS,
+      RELOAD_MS * Math.pow(RELOAD_MULT_PER_STACK, this.stacksOf("reload")),
+    );
   }
 
   // ── 이동(WASD) ───────────────────────────────────────────────
@@ -206,7 +389,8 @@ export class DungeonScene extends Phaser.Scene {
       vx *= Math.SQRT1_2;
       vy *= Math.SQRT1_2;
     }
-    this.player.setVelocity(vx * PLAYER_SPEED, vy * PLAYER_SPEED);
+    const speed = this.effectivePlayerSpeed();
+    this.player.setVelocity(vx * speed, vy * speed);
     if (vx < 0) this.player.setFlipX(true);
     else if (vx > 0) this.player.setFlipX(false);
 
@@ -268,21 +452,63 @@ export class DungeonScene extends Phaser.Scene {
       if (this.ammo <= 0 && !this.reloading) this.startReload();
       return;
     }
-    if (time - this.lastFiredAt < FIRE_COOLDOWN_MS) return;
+    if (time - this.lastFiredAt < this.effectiveFireCooldownMs()) return;
     this.lastFiredAt = time;
 
-    const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
-    const bullet = this.bullets.create(
-      this.player.x,
-      this.player.y,
-      "bullet",
-    ) as Phaser.Physics.Arcade.Image;
-    this.physics.velocityFromRotation(angle, BULLET_SPEED, bullet.body!.velocity);
-    this.showMuzzleFlash(angle);
+    const baseAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
+    const angles = this.computeFiringAngles(baseAngle);
+    const originX = this.player.x;
+    const originY = this.player.y;
+    this.fireBulletSet(angles, originX, originY);
+    this.showMuzzleFlash(baseAngle);
+
+    // 쌍딱총(doubleshot) — 확산 없이 같은 각도 배열을 그대로, 같은 발사 지점
+    // (originX/Y)에서 약 80ms 뒤 한 번 더 쏜다. 그 사이 플레이어가 움직여도
+    // "그 순간 쐈던 것과 완전히 겹치는 한 발"이라는 의미가 유지되도록 재조준하지 않는다.
+    if (this.stacksOf("doubleshot") > 0) {
+      this.time.delayedCall(DOUBLESHOT_DELAY_MS, () => {
+        if (this.ended) return;
+        this.fireBulletSet(angles, originX, originY);
+      });
+    }
 
     this.ammo -= 1;
     EventBus.emit(CombatEvents.AmmoChanged, { current: this.ammo, max: this.ammoMax });
     if (this.ammo <= 0) this.startReload();
+  }
+
+  /** 고무줄 연사(multishot) 스택 수만큼 각도 배열을 만든다 — 기본 1발이면
+   * baseAngle 그대로, 스택이 있으면 baseAngle을 중심으로 15° 간격 부채꼴로
+   * 균등 확산시킨다(최대 3스택 = 4발). 쌍딱총이 "이 배열 전체"를 한 번 더
+   * 쏘는 방식으로 자연스럽게 합성되도록, 발사 로직은 이 각도 배열만 소비한다. */
+  private computeFiringAngles(baseAngle: number): number[] {
+    const bulletCount = 1 + this.stacksOf("multishot");
+    if (bulletCount <= 1) return [baseAngle];
+
+    // 짝수 개일 때 좌우 대칭으로만 벌리면 정중앙(진짜 조준각)엔 총알이 하나도
+    // 안 간다(2발 = -7.5°/+7.5°뿐이라 가운데 타겟은 항상 빗나감). 그래서 항상
+    // baseAngle을 하나 포함시키고, 나머지를 좌→우→좌→우 순서로 덧붙인다 —
+    // 홀수 개는 기존과 동일한 대칭 부채꼴이 되고, 짝수 개만 가운데 하나 +
+    // 한쪽으로 치우친 나머지가 된다.
+    const spreadRad = Phaser.Math.DegToRad(MULTISHOT_SPREAD_DEG);
+    const angles = [baseAngle];
+    for (let extra = 1; extra < bulletCount; extra++) {
+      const step = Math.ceil(extra / 2) * spreadRad;
+      const sign = extra % 2 === 1 ? 1 : -1;
+      angles.push(baseAngle + sign * step);
+    }
+    return angles;
+  }
+
+  /** 주어진 각도 배열대로 총알을 한 세트 생성한다. 비석치기(ricochet) 스택이
+   * 있으면 각 총알에 남은 튕김 횟수를 데이터로 심어둔다(obstacle collider에서 소비). */
+  private fireBulletSet(angles: readonly number[], originX: number, originY: number) {
+    const bounces = this.stacksOf("ricochet");
+    for (const angle of angles) {
+      const bullet = this.bullets.create(originX, originY, "bullet") as Phaser.Physics.Arcade.Image;
+      this.physics.velocityFromRotation(angle, BULLET_SPEED, bullet.body!.velocity);
+      if (bounces > 0) bullet.setData("bouncesLeft", bounces);
+    }
   }
 
   /** 발사 순간 총구 앞에 잠깐 뜨는 섬광 — 자동사격이라 타격감을 눈으로
@@ -300,7 +526,7 @@ export class DungeonScene extends Phaser.Scene {
   private startReload() {
     if (this.reloading || this.ammo >= this.ammoMax) return;
     this.reloading = true;
-    this.time.delayedCall(RELOAD_MS, () => {
+    this.time.delayedCall(this.effectiveReloadMs(), () => {
       this.ammo = this.ammoMax;
       this.reloading = false;
       EventBus.emit(CombatEvents.AmmoChanged, { current: this.ammo, max: this.ammoMax });
@@ -322,6 +548,10 @@ export class DungeonScene extends Phaser.Scene {
       const archetype = enemy.getData("archetype") as EnemyArchetype;
       if (archetype === "roller") {
         this.updateRoller(enemy, time);
+        continue;
+      }
+      if (archetype === "bomber") {
+        this.updateBomber(enemy, time);
         continue;
       }
       this.homeTowardPlayer(enemy, ARCHETYPE_STATS[archetype].speed, time);
@@ -366,15 +596,58 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
+  /** 🧨 폭탄돌리기(자폭몹)의 움직임: 평소엔 빠르게 직진 추적하다가, 플레이어
+   * 반경 BOMBER_TRIGGER_RANGE 이내로 들어오면 그 자리에 멈춰 서서 짧게
+   * 깜빡이는 예열(텔레그래프)에 들어가고, 예열이 끝나면 폭발한다. 예열 중
+   * 총알에 맞아 죽으면(onBulletHitEnemy → killEnemy) "dying" 플래그가 서서
+   * updateEnemyHoming 진입부에서 걸러지므로 이 함수 자체가 더 이상 호출되지
+   * 않는다 — 즉 폭발 없이 그냥 죽는 경로는 별도 분기 없이 자연히 보장된다. */
+  private updateBomber(enemy: Phaser.Physics.Arcade.Sprite, time: number) {
+    const state = (enemy.getData("bomberState") as "chasing" | "priming" | undefined) ?? "chasing";
+
+    if (state === "priming") {
+      const stateAt = (enemy.getData("bomberStateAt") as number | undefined) ?? time;
+      // 깜빡임 텔레그래프 — updateWalkFrame과 같은 "시간 기반 토글" 방식이라
+      // 별도 tween을 만들고 정리(destroy 시 kill 등)할 필요가 없다.
+      const blinkOn = Math.floor((time - stateAt) / BOMBER_BLINK_MS) % 2 === 0;
+      enemy.setTintFill(blinkOn ? 0xff3b30 : 0xffffff);
+      if (time - stateAt >= BOMBER_PRIME_MS) {
+        this.explodeBomber(enemy);
+      }
+      return;
+    }
+
+    const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+    if (dist <= BOMBER_TRIGGER_RANGE) {
+      enemy.setData("bomberState", "priming");
+      enemy.setData("bomberStateAt", time);
+      enemy.setVelocity(0, 0);
+      return;
+    }
+    this.homeTowardPlayer(enemy, BOMBER_SPEED, time);
+  }
+
+  /** 예열이 끝났을 때 실제 폭발 처리 — 그 순간에도 플레이어가 폭발 반경
+   * 안에 있어야 데미지가 들어간다(예열 중 플레이어가 도망치면 피해를 회피할
+   * 수 있다는 뜻 — 다른 텔레그래프 공격들과 동일한 "피할 시간을 준다" 원칙). */
+  private explodeBomber(enemy: Phaser.Physics.Arcade.Sprite) {
+    if (enemy.getData("dying")) return;
+    const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+    if (dist <= BOMBER_TRIGGER_RANGE) {
+      this.damagePlayer(BOMBER_EXPLOSION_DAMAGE);
+    }
+    this.killEnemy(enemy);
+  }
+
   private cleanupOffscreenBullets() {
     for (const bulletObj of this.bullets.getChildren()) {
       const bullet = bulletObj as Phaser.Physics.Arcade.Image;
       if (!bullet.active) continue;
       if (
         bullet.x < -16 ||
-        bullet.x > CANVAS_W + 16 ||
+        bullet.x > WORLD_W + 16 ||
         bullet.y < -16 ||
-        bullet.y > CANVAS_H + 16
+        bullet.y > WORLD_H + 16
       ) {
         bullet.destroy();
       }
@@ -390,7 +663,7 @@ export class DungeonScene extends Phaser.Scene {
     for (const enemyObj of this.enemies.getChildren()) {
       const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
       if (!enemy.active) continue;
-      if (enemy.x < -60 || enemy.x > CANVAS_W + 60 || enemy.y < -60 || enemy.y > CANVAS_H + 60) {
+      if (enemy.x < -60 || enemy.x > WORLD_W + 60 || enemy.y < -60 || enemy.y > WORLD_H + 60) {
         enemy.destroy();
         enemyEscaped = true;
       }
@@ -399,6 +672,38 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   // ── 충돌 처리 ────────────────────────────────────────────────
+
+  /** 비석치기(ricochet) 스택이 있는 총알은 엄폐물에 맞아도 파괴되지 않고
+   * 반사각으로 튕겨 계속 날아간다. 장애물이 축에 정렬된 사각형이라, 정밀한
+   * 충돌면 계산 대신 "더 얕게 겹친 축을 반사면으로 본다"는 근사치를 쓴다 —
+   * 완벽한 물리는 아니어도 "튕겨 나간다"는 느낌은 충분히 낸다. */
+  private onBulletHitObstacle(
+    bullet: Phaser.Physics.Arcade.Image,
+    obstacle: Phaser.Physics.Arcade.Image,
+  ) {
+    if (!bullet.active) return;
+
+    const bouncesLeft = (bullet.getData("bouncesLeft") as number | undefined) ?? 0;
+    if (bouncesLeft <= 0) {
+      bullet.destroy();
+      return;
+    }
+
+    const body = bullet.body as Phaser.Physics.Arcade.Body;
+    const obstacleBody = obstacle.body as Phaser.Physics.Arcade.StaticBody;
+    const dx = bullet.x - obstacle.x;
+    const dy = bullet.y - obstacle.y;
+    const overlapX = obstacleBody.halfWidth - Math.abs(dx);
+    const overlapY = obstacleBody.halfHeight - Math.abs(dy);
+
+    if (overlapX < overlapY) {
+      body.velocity.x *= -1;
+    } else {
+      body.velocity.y *= -1;
+    }
+
+    bullet.setData("bouncesLeft", bouncesLeft - 1);
+  }
 
   private onBulletHitEnemy(
     bullet: Phaser.Physics.Arcade.Image,
@@ -414,8 +719,16 @@ export class DungeonScene extends Phaser.Scene {
       return;
     }
 
-    const hp = (enemy.getData("hp") as number) - this.bulletDamage;
+    // 자동 딱총(turret) 총알은 별도 데미지(메인 총의 50%)를 데이터로 심어서
+    // 넘어온다 — 그 외엔 메인 총알과 완전히 같은 피격 파이프라인을 그대로 탄다.
+    const overrideDamage = bullet.getData("damageOverride") as number | undefined;
+    // 기본 방어력(전체 몹 공통) — 총알 데미지에서 고정 경감, 최소 1 데미지는 항상 보장.
+    const dmg = Math.max(1, Math.round(overrideDamage ?? this.effectiveBulletDamage()) - BASE_ARMOR);
+    const hp = (enemy.getData("hp") as number) - dmg;
     enemy.setData("hp", hp);
+
+    this.applyElementalHits(enemy, dmg);
+
     if (hp <= 0) {
       this.killEnemy(enemy);
     } else {
@@ -423,22 +736,95 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
+  /** 보유한 속성탄(elem_*)을 전부 순회해 명중 효과를 건다 — 스택형이라 여러
+   * 속성탄을 동시에 들고 있으면 전부 함께 적용된다(서로 상쇄 없음). 실제
+   * 상태이상 로직은 병렬 브랜치가 statusEffects.ts에 구현하고, 여기서는
+   * "무엇이 몇 스택 있는지"만 넘겨준다. */
+  private applyElementalHits(enemy: Phaser.Physics.Arcade.Sprite, hitDamage: number) {
+    if (this.appliedUpgrades.size === 0) return;
+    const ctx = { player: this.player, enemies: this.enemies, time: this.time.now };
+    // Map을 for-of로 직접 순회하면 이 프로젝트의 tsconfig(target 미지정 → ES3
+    // 기본값)에서 downlevelIteration 에러가 나서, forEach로 순회한다.
+    this.appliedUpgrades.forEach((stacks, id) => {
+      if (stacks <= 0 || !id.startsWith("elem_")) return;
+      const element = id.slice("elem_".length) as ElementKey;
+      applyElementalOnHit(enemy, element, stacks, hitDamage, ctx);
+    });
+  }
+
+  /** 부비트랩·폭탄 던지기(newAttackPatterns.ts)가 쓰는 광역 데미지 진입점.
+   * onBulletHitEnemy와 같은 규칙(방어력 경감·최소 1뎀 보장·롤러형 방패 차단·
+   * 속성탄 적용·사망 연출)을 그대로 따른다 — 총알이 아니라 폭발이라는
+   * 점만 다르고 "명중 처리"의 본질은 같다고 보고 파이프라인을 공유한다. */
+  private applyAoeDamage(x: number, y: number, radius: number, rawDamage: number) {
+    const dmg = Math.max(1, Math.round(rawDamage) - BASE_ARMOR);
+    for (const enemyObj of this.enemies.getChildren()) {
+      const enemy = enemyObj as Phaser.Physics.Arcade.Sprite;
+      if (!enemy.active || enemy.getData("dying")) continue;
+      const dist = Phaser.Math.Distance.Between(x, y, enemy.x, enemy.y);
+      if (dist > radius) continue;
+
+      const archetype = enemy.getData("archetype") as EnemyArchetype | undefined;
+      if (archetype === "roller" && enemy.getData("rollState") !== "rolling") {
+        this.flashHit(enemy, 0xffe066);
+        continue;
+      }
+
+      const hp = (enemy.getData("hp") as number) - dmg;
+      enemy.setData("hp", hp);
+      this.applyElementalHits(enemy, dmg);
+
+      if (hp <= 0) {
+        this.killEnemy(enemy);
+      } else {
+        this.flashHit(enemy);
+      }
+    }
+  }
+
   private onPlayerHitEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
     if (this.ended || !enemy.active || enemy.getData("dying")) return;
+    const contactDamage = enemy.getData("contactDamage") as number;
+    // 접촉 무적 시간 중이면 데미지가 안 들어가고(damagePlayer가 false 반환),
+    // 이 경우 적도 죽이지 않는다 — 무적이 끝난 뒤 다시 부딪혀야 판정되게
+    // 기존 동작을 그대로 유지(damagePlayer로 추출하기 전부터의 동작).
+    if (this.damagePlayer(contactDamage)) this.killEnemy(enemy);
+  }
+
+  /** 플레이어 피격 공통 처리 — 접촉 데미지(onPlayerHitEnemy)와 폭탄돌리기
+   * 자폭 데미지(explodeBomber)가 함께 쓴다. 접촉 무적 시간(lastHitAt) 안이면
+   * 데미지를 주지 않고 false를 반환한다(호출부가 그에 맞춰 후속 처리를
+   * 건너뛸 수 있도록). */
+  private damagePlayer(amount: number): boolean {
+    if (this.ended) return false;
     const now = this.time.now;
-    if (now - this.lastHitAt < CONTACT_INVULN_MS) return;
+    if (now - this.lastHitAt < CONTACT_INVULN_MS) return false;
     this.lastHitAt = now;
 
-    const contactDamage = enemy.getData("contactDamage") as number;
-    this.hp = Math.max(0, this.hp - contactDamage);
+    this.hp = Math.max(0, this.hp - amount);
     EventBus.emit(CombatEvents.HpChanged, { current: this.hp, max: PLAYER_MAX_HP });
     this.flashHit(this.player);
-    this.killEnemy(enemy);
 
-    if (this.hp <= 0) {
-      this.endRun("died");
-      return;
-    }
+    if (this.hp <= 0) this.endRun("died");
+    return true;
+  }
+
+  /** 적 투사체(딱지/돌멩이/새총알/책장)에 맞았을 때 데미지 적용 — 접촉 피격
+   * (lastHitAt/CONTACT_INVULN_MS)과는 별도 무적시간을 쓴다. 서로 다른
+   * 공격 수단이라 한쪽 무적이 다른 쪽까지 막을 이유가 없고, 특히 엘리트의
+   * 부채꼴 다발 투척이 근접 상태에서 여러 발 동시 명중해도 이 무적시간
+   * 덕에 한 틱만큼만 데미지가 들어간다(다발 전체가 한 방처럼 몰리진 않음). */
+  private applyEnemyProjectileDamage(amount: number) {
+    if (this.ended) return;
+    const now = this.time.now;
+    if (now - this.lastProjectileHitAt < CONTACT_INVULN_MS) return;
+    this.lastProjectileHitAt = now;
+
+    this.hp = Math.max(0, this.hp - amount);
+    EventBus.emit(CombatEvents.HpChanged, { current: this.hp, max: PLAYER_MAX_HP });
+    this.flashHit(this.player);
+
+    if (this.hp <= 0) this.endRun("died");
   }
 
   /** 짧게 틴트 플래시 후 원래대로 — 총알/접촉 피격 둘 다 재사용. 기본은
@@ -507,6 +893,10 @@ export class DungeonScene extends Phaser.Scene {
             enemy.setData("rollState", "guard");
             enemy.setData("rollStateAt", this.time.now);
           }
+          if (spawn.archetype === "bomber") {
+            enemy.setData("bomberState", "chasing");
+            enemy.setData("bomberStateAt", this.time.now);
+          }
         }
       });
     });
@@ -514,17 +904,20 @@ export class DungeonScene extends Phaser.Scene {
     this.time.delayedCall(spawns.length * SPAWN_STAGGER_MS + 50, () => this.checkWaveClear());
   }
 
-  /** 화면 가장자리 바로 밖 임의의 지점 — 사방에서 플레이어를 향해 등장한다. */
+  /** 월드 가장자리 바로 밖 임의의 지점 — 사방에서 플레이어를 향해 등장한다.
+   * 월드가 뷰포트보다 커진 뒤로는 "화면 밖"이 아니라 "월드 밖"에서 스폰돼야
+   * 카메라가 플레이어를 따라갈 때도 몹이 항상 월드 경계 바깥에서 자연스럽게
+   * 걸어 들어온다. */
   private randomEdgePoint(): { x: number; y: number } {
     switch (Phaser.Math.Between(0, 3)) {
       case 0:
-        return { x: Phaser.Math.Between(0, CANVAS_W), y: -SPAWN_MARGIN };
+        return { x: Phaser.Math.Between(0, WORLD_W), y: -SPAWN_MARGIN };
       case 1:
-        return { x: Phaser.Math.Between(0, CANVAS_W), y: CANVAS_H + SPAWN_MARGIN };
+        return { x: Phaser.Math.Between(0, WORLD_W), y: WORLD_H + SPAWN_MARGIN };
       case 2:
-        return { x: -SPAWN_MARGIN, y: Phaser.Math.Between(0, CANVAS_H) };
+        return { x: -SPAWN_MARGIN, y: Phaser.Math.Between(0, WORLD_H) };
       default:
-        return { x: CANVAS_W + SPAWN_MARGIN, y: Phaser.Math.Between(0, CANVAS_H) };
+        return { x: WORLD_W + SPAWN_MARGIN, y: Phaser.Math.Between(0, WORLD_H) };
     }
   }
 
@@ -561,7 +954,17 @@ export class DungeonScene extends Phaser.Scene {
       this.endRun("cleared");
       return;
     }
-    this.time.delayedCall(600, () => this.startRound(this.roundIndex + 1));
+
+    // 1라운드 클리어 후(pickIndex 1) / 2라운드 클리어 후(pickIndex 2) 업그레이드
+    // 선택을 끼워 넣는다 — 여기 도달했다는 건 clearedCount < ROUND_COUNT(3)이라는
+    // 뜻이라 roundIndex는 항상 0 아니면 1이고, 다음 pickIndex도 자연히 1 또는 2가
+    // 된다. 3라운드(엘리트) 클리어 후에는 위에서 이미 endRun으로 빠져서 4번째
+    // 선택은 생기지 않는다.
+    const nextRoundIndex = this.roundIndex + 1;
+    const pickIndex = nextRoundIndex;
+    this.time.delayedCall(600, () => {
+      this.showUpgradeChoice(pickIndex, () => this.startRound(nextRoundIndex));
+    });
   }
 
   private endRun(result: "cleared" | "died") {
