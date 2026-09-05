@@ -13,6 +13,7 @@ import { EventBus } from "../EventBus";
 import { CombatEvents, type RunEndedPayload, type UpgradeChosenPayload } from "../events";
 import { pickMapLayout, type ObstacleType } from "../maps";
 import { applyElementalOnHit, tickStatusEffects } from "../statusEffects";
+import { onEnemyProjectileHitObstacle, onEnemyProjectileHitPlayer, tickEnemyRanged } from "../enemyRanged";
 import { AttackPatternsController } from "../newAttackPatterns";
 
 const OBSTACLE_TEXTURE: Record<ObstacleType, string> = {
@@ -139,6 +140,9 @@ export class DungeonScene extends Phaser.Scene {
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
   private obstacles!: Phaser.Physics.Arcade.StaticGroup;
+  // 몹 원거리 공격 투사체(docs/blueprint.html#expansion2 "1. 몹 원거리 공격") —
+  // 실제 예열·발사 로직은 enemyRanged.ts 소관, 여기서는 그룹·충돌만 연결한다.
+  private enemyProjectiles!: Phaser.Physics.Arcade.Group;
   // 부비트랩·자동 딱총·폭탄 던지기(신규 공격 패턴 3종) 전담 컨트롤러 —
   // 실제 로직은 newAttackPatterns.ts 소관, DungeonScene은 생성 + tick() 호출만.
   private attackPatterns!: AttackPatternsController;
@@ -152,6 +156,7 @@ export class DungeonScene extends Phaser.Scene {
   private reloading = false;
   private lastFiredAt = 0;
   private lastHitAt = -Infinity;
+  private lastProjectileHitAt = -Infinity; // 적 투사체 피격용 별도 무적시간(접촉 피격과 독립)
   private bulletDamage = 10;
 
   // 런 한정 업그레이드 보유 현황(블루프린트 「업그레이드 시스템」) — 마을 상점의
@@ -211,10 +216,10 @@ export class DungeonScene extends Phaser.Scene {
 
     this.bullets = this.physics.add.group({ allowGravity: false });
     this.enemies = this.physics.add.group({ allowGravity: false });
+    this.enemyProjectiles = this.physics.add.group({ allowGravity: false });
 
-    // 엄폐물은 이동과 총알을 둘 다 막는다 — 적에게 원거리 공격이 없어서, 이게
-    // "은폐/엄폐"가 실질적인 의미를 가지는 유일한 방식이다(플레이어가 사선을
-    // 끊어 추격을 따돌리거나, 자기 총알도 막힌다는 트레이드오프를 진다).
+    // 엄폐물은 이동과 총알을 둘 다 막는다 — 몹 원거리 공격도 동일 규칙(플레이어
+    // 총알과 대칭)으로 막혀야 "은폐/엄폐"가 양방향으로 의미를 가진다.
     this.physics.add.collider(this.player, this.obstacles);
     this.physics.add.collider(this.enemies, this.obstacles);
     this.physics.add.collider(this.bullets, this.obstacles, (bulletObj, obstacleObj) => {
@@ -222,6 +227,9 @@ export class DungeonScene extends Phaser.Scene {
         bulletObj as Phaser.Physics.Arcade.Image,
         obstacleObj as Phaser.Physics.Arcade.Image,
       );
+    });
+    this.physics.add.collider(this.enemyProjectiles, this.obstacles, (projObj) => {
+      onEnemyProjectileHitObstacle(projObj as Phaser.Physics.Arcade.Image);
     });
 
     this.physics.add.overlap(this.bullets, this.enemies, (bulletObj, enemyObj) => {
@@ -232,6 +240,11 @@ export class DungeonScene extends Phaser.Scene {
     });
     this.physics.add.overlap(this.player, this.enemies, (_p, enemyObj) => {
       this.onPlayerHitEnemy(enemyObj as Phaser.Physics.Arcade.Sprite);
+    });
+    this.physics.add.overlap(this.enemyProjectiles, this.player, (projObj) => {
+      onEnemyProjectileHitPlayer(projObj as Phaser.Physics.Arcade.Image, (dmg) =>
+        this.applyEnemyProjectileDamage(dmg),
+      );
     });
 
     this.attackPatterns = new AttackPatternsController({
@@ -277,6 +290,15 @@ export class DungeonScene extends Phaser.Scene {
     this.updateAutoAim(time);
     this.updateEnemyHoming();
     this.attackPatterns.tick(time);
+
+    // 몹 원거리 공격(예열·발사) 진행 — updateEnemyHoming() 이후에 호출해야
+    // 예열 중 이동 정지가 추적 이동에 덮어써지지 않는다.
+    tickEnemyRanged({
+      player: this.player,
+      enemies: this.enemies,
+      projectiles: this.enemyProjectiles,
+      time,
+    });
 
     // NOTE(merge): 속성탄 상태이상 틱 처리. 병렬 브랜치가 statusEffects.ts를
     // 실제 구현으로 교체할 때 이 한 줄과 import만 바뀌면 된다 — 위아래 줄은
@@ -785,6 +807,24 @@ export class DungeonScene extends Phaser.Scene {
 
     if (this.hp <= 0) this.endRun("died");
     return true;
+  }
+
+  /** 적 투사체(딱지/돌멩이/새총알/책장)에 맞았을 때 데미지 적용 — 접촉 피격
+   * (lastHitAt/CONTACT_INVULN_MS)과는 별도 무적시간을 쓴다. 서로 다른
+   * 공격 수단이라 한쪽 무적이 다른 쪽까지 막을 이유가 없고, 특히 엘리트의
+   * 부채꼴 다발 투척이 근접 상태에서 여러 발 동시 명중해도 이 무적시간
+   * 덕에 한 틱만큼만 데미지가 들어간다(다발 전체가 한 방처럼 몰리진 않음). */
+  private applyEnemyProjectileDamage(amount: number) {
+    if (this.ended) return;
+    const now = this.time.now;
+    if (now - this.lastProjectileHitAt < CONTACT_INVULN_MS) return;
+    this.lastProjectileHitAt = now;
+
+    this.hp = Math.max(0, this.hp - amount);
+    EventBus.emit(CombatEvents.HpChanged, { current: this.hp, max: PLAYER_MAX_HP });
+    this.flashHit(this.player);
+
+    if (this.hp <= 0) this.endRun("died");
   }
 
   /** 짧게 틴트 플래시 후 원래대로 — 총알/접촉 피격 둘 다 재사용. 기본은

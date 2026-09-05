@@ -24,6 +24,10 @@ const PALETTE = {
   speedOutline: 0xc4a62e,
   rollerBody: 0xb8bec2,
   rollerOutline: 0x8e9598,
+  projDdakji: 0xd4537e,
+  projStone: 0x9c9689,
+  projSling: 0xc4694a,
+  projBook: 0xf7f3e6,
   bomberBody: 0xd6432c, // 위험을 바로 알아보게 붉은 계열(경고색)
   bomberOutline: 0x8a2418,
 };
@@ -84,6 +88,48 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
       g.fillCircle(4, 4, 4);
     },
     8,
+  );
+
+  // 몹 원거리 공격 투사체(docs/blueprint.html#expansion2 "1. 몹 원거리 공격") —
+  // enemy_proj_*.png 로드가 실패했을 때만 쓰이는 절차 생성 폴백.
+  ensure(
+    scene,
+    "enemy_proj_ddakji",
+    (g) => {
+      g.fillStyle(PALETTE.projDdakji, 1);
+      g.fillCircle(4, 4, 4);
+    },
+    8,
+  );
+
+  ensure(
+    scene,
+    "enemy_proj_stone",
+    (g) => {
+      g.fillStyle(PALETTE.projStone, 1);
+      g.fillCircle(4, 4, 4);
+    },
+    8,
+  );
+
+  ensure(
+    scene,
+    "enemy_proj_sling",
+    (g) => {
+      g.fillStyle(PALETTE.projSling, 1);
+      g.fillCircle(4, 4, 4);
+    },
+    8,
+  );
+
+  ensure(
+    scene,
+    "enemy_proj_book",
+    (g) => {
+      g.fillStyle(PALETTE.projBook, 1);
+      g.fillRect(2, 2, 12, 8);
+    },
+    16,
   );
 
   ensure(
